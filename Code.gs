@@ -16,7 +16,7 @@ function calculateFPYSummary_FINAL() {
 
   sheet.clear();
 
-  // Layout
+  // Build layout to match screenshot
   sheet.getRange('A1').setValue('Month/Year');
   sheet.getRange('A2').setValue('Plant Average');
   sheet.getRange('A4').setValue('Current Year Total');
@@ -44,17 +44,12 @@ function calculateFPYSummary_FINAL() {
 
   let url = BASE + '/feed/inspections?modified_after=2026-01-01T00:00:00Z&limit=100';
 
-  const data = {};
-  const yearTotals = {};
+  const monthlyData = {};
+  const yearlyTotals = {};
   const monthKeys = [];
 
-  let totalProcessed = 0;
-  let matchedTemplate = 0;
-  let missingInspectionId = 0;
-  let detailFailures = 0;
-
   PRODUCTS.forEach(function (product) {
-    yearTotals[product] = { total: 0, defects: 0 };
+    yearlyTotals[product] = { total: 0, defects: 0 };
   });
 
   function extractAnswerFromResponses(responses) {
@@ -174,17 +169,11 @@ function calculateFPYSummary_FINAL() {
     if (!inspections.length) break;
 
     for (const inspection of inspections) {
-      totalProcessed++;
-
       const productLine = TEMPLATE_MAP[inspection.template_id];
       if (!productLine) continue;
-      matchedTemplate++;
 
       const inspectionId = inspection.inspection_id || inspection.audit_id || inspection.id;
-      if (!inspectionId) {
-        missingInspectionId++;
-        continue;
-      }
+      if (!inspectionId) continue;
 
       const dateStr =
         inspection.date_completed ||
@@ -204,10 +193,7 @@ function calculateFPYSummary_FINAL() {
       if (!monthKeys.includes(monthKey)) monthKeys.push(monthKey);
 
       const detail = fetchInspectionDetail(inspectionId);
-      if (!detail) {
-        detailFailures++;
-        continue;
-      }
+      if (!detail) continue;
 
       const defectAnswer =
         findDefectAnswer(detail.header_items) ||
@@ -218,15 +204,17 @@ function calculateFPYSummary_FINAL() {
 
       const key = productLine + '|' + monthKey;
 
+      if (!monthlyData[key]) {
+        monthlyData[key] = { total: 0, defects: 0 };
       if (!data[key]) {
         data[key] = { total: 0, defects: 0 };
       }
 
-      data[key].total++;
-      if (defectFound) data[key].defects++;
+      monthlyData[key].total++;
+      if (defectFound) monthlyData[key].defects++;
 
-      yearTotals[productLine].total++;
-      if (defectFound) yearTotals[productLine].defects++;
+      yearlyTotals[productLine].total++;
+      if (defectFound) yearlyTotals[productLine].defects++;
 
       Utilities.sleep(100);
     }
@@ -270,16 +258,10 @@ function calculateFPYSummary_FINAL() {
     sheet.getRange(5, 1, monthLabelValues.length, 1).setValues(monthLabelValues);
   }
 
-  const startCols = {
-    ARU: 2,
-    CSC: 5,
-    HGRH: 8,
-    MSC: 11
-  };
-
+  // Monthly data starts row 5
   PRODUCTS.forEach(function (product) {
     const out = monthKeys.map(function (mk) {
-      const record = data[product + '|' + mk] || { total: 0, defects: 0 };
+      const record = monthlyData[product + '|' + mk] || { total: 0, defects: 0 };
       const fpy = record.total > 0 ? (record.total - record.defects) / record.total : 0;
       return [record.total, record.defects, fpy];
     });
@@ -292,19 +274,22 @@ function calculateFPYSummary_FINAL() {
   const monthlyRowCount = monthKeys.length;
   const lastDataRow = Math.max(5, monthlyRowCount + 4);
 
-  // Number formatting
+  // Formatting
   if (monthlyRowCount > 0) {
+    // Monthly count columns
     sheet.getRange(5, 2, monthlyRowCount, 2).setNumberFormat('0');
     sheet.getRange(5, 5, monthlyRowCount, 2).setNumberFormat('0');
     sheet.getRange(5, 8, monthlyRowCount, 2).setNumberFormat('0');
     sheet.getRange(5, 11, monthlyRowCount, 2).setNumberFormat('0');
 
+    // Monthly FPY columns
     sheet.getRange(5, 4, monthlyRowCount, 1).setNumberFormat('0.00%');
     sheet.getRange(5, 7, monthlyRowCount, 1).setNumberFormat('0.00%');
     sheet.getRange(5, 10, monthlyRowCount, 1).setNumberFormat('0.00%');
     sheet.getRange(5, 13, monthlyRowCount, 1).setNumberFormat('0.00%');
   }
 
+  // Current year totals row
   sheet.getRange('B4').setNumberFormat('0');
   sheet.getRange('C4').setNumberFormat('0');
   sheet.getRange('D4').setNumberFormat('0.00%');
@@ -321,50 +306,36 @@ function calculateFPYSummary_FINAL() {
   sheet.getRange('L4').setNumberFormat('0');
   sheet.getRange('M4').setNumberFormat('0.00%');
 
+  // Plant average row
   sheet.getRange('B2').setNumberFormat('0.00%');
   sheet.getRange('E2').setNumberFormat('0.00%');
   sheet.getRange('H2').setNumberFormat('0.00%');
   sheet.getRange('K2').setNumberFormat('0.00%');
 
-  // Formatting and black borders
+  // Borders and layout
   sheet.getRange('A1:M' + lastDataRow).setBorder(
     true, true, true, true, true, true,
     'black',
     SpreadsheetApp.BorderStyle.SOLID
   );
 
-  sheet.getRange('A1:M3').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('A1:M4').setFontWeight('bold').setHorizontalAlignment('center');
   sheet.getRange('B2:D2').setHorizontalAlignment('center');
   sheet.getRange('E2:G2').setHorizontalAlignment('center');
   sheet.getRange('H2:J2').setHorizontalAlignment('center');
   sheet.getRange('K2:M2').setHorizontalAlignment('center');
-  sheet.getRange('A4:A' + lastDataRow).setHorizontalAlignment('right');
+  sheet.getRange('A4:A' + lastDataRow).setHorizontalAlignment('left');
 
-  // Auto resize columns A:M
+  // Auto resize
   for (let col = 1; col <= 13; col++) {
     sheet.autoResizeColumn(col);
   }
 
-  // Keep some columns from getting too narrow
-  sheet.setColumnWidth(1, Math.max(sheet.getColumnWidth(1), 120));
-  sheet.setColumnWidth(2, Math.max(sheet.getColumnWidth(2), 110));
-  sheet.setColumnWidth(5, Math.max(sheet.getColumnWidth(5), 110));
-  sheet.setColumnWidth(8, Math.max(sheet.getColumnWidth(8), 110));
-  sheet.setColumnWidth(11, Math.max(sheet.getColumnWidth(11), 110));
+  sheet.setColumnWidth(1, Math.max(sheet.getColumnWidth(1), 140));
 
-  // Row heights
+  // Row sizes
   sheet.setRowHeight(1, 28);
   sheet.setRowHeight(2, 28);
   sheet.setRowHeight(3, 28);
-  sheet.setFrozenRows(4);
-
-  // Debug block
-  const debugStartRow = Math.max(9, lastDataRow + 2);
-  const debugOutput = [
-    ['DEBUG totalProcessed', totalProcessed],
-    ['DEBUG matchedTemplate', matchedTemplate],
-    ['DEBUG missingInspectionId', missingInspectionId],
-    ['DEBUG detailFailures', detailFailures]
-  ];
-  sheet.getRange(debugStartRow, 1, debugOutput.length, 2).setValues(debugOutput);
+  sheet.setRowHeight(4, 28);
 }
