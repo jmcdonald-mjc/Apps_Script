@@ -1,19 +1,18 @@
 function calculateFPYSummary_FINAL() {
   const token = 'scapi_Rr6jleu8o5EgnXnDi_UriXsH-xta_zGELOJtc0ObUdFweWlrtvJCm1-DCIPLyNZxGLn1CREeZGLu3IybDIX-VpP3o-QmUOQewXhkL3hq8QBLAGnRK7bnTts1_odUZ0HZELTJZlGA1au36uGQ-85dK_V17Jxpayn6g85aJHCgdgY';
-  // Add future template IDs to this list.
-  const TEMPLATE_IDS = [
-    'template_9f49d4f7e3924b9fa36bcc249f5ea96a',
-    'template_95a16e28e5184839899cf3dfb6dbf286',
-    'template_db8cb7b6b670439088dfa3f780d020d4',
-    'template_eeefdf55f60440e583f20e91db821b8d'
-  ];
   const BASE = 'https://api.safetyculture.io';
+  const TEMPLATE_MAP = {
+    template_9f49d4f7e3924b9fa36bcc249f5ea96a: 'ARU',
+    template_95a16e28e5184839899cf3dfb6dbf286: 'CSC',
+    template_db8cb7b6b670439088dfa3f780d020d4: 'MSC',
+    template_eeefdf55f60440e583f20e91db821b8d: 'HGRH'
+  };
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   sheet.clear();
 
   const output = [];
-  output.push(['Year', 'Month', 'Total', 'Defects', 'FPY']);
+  output.push(['Product Line', 'Year', 'Month', 'Total', 'Defects', 'FPY']);
 
   let url = BASE + '/feed/inspections?modified_after=2026-01-01T00:00:00Z&limit=100';
 
@@ -142,7 +141,8 @@ function calculateFPYSummary_FINAL() {
     for (const inspection of inspections) {
       totalProcessed++;
 
-      if (!TEMPLATE_IDS.includes(inspection.template_id)) continue;
+      const productLine = TEMPLATE_MAP[inspection.template_id];
+      if (!productLine) continue;
       matchedTemplate++;
 
       const inspectionId = inspection.inspection_id || inspection.audit_id || inspection.id;
@@ -176,11 +176,17 @@ function calculateFPYSummary_FINAL() {
       const defectFound = String(defectAnswer).trim().toLowerCase() === 'yes';
 
       const year = String(d.getFullYear());
-      const month = String(d.getMonth());
-      const key = year + '|' + month;
+      const month = String(d.getMonth() + 1);
+      const key = productLine + '|' + year + '|' + month;
 
       if (!data[key]) {
-        data[key] = { total: 0, defects: 0 };
+        data[key] = {
+          productLine: productLine,
+          year: year,
+          month: month,
+          total: 0,
+          defects: 0
+        };
       }
 
       data[key].total++;
@@ -198,34 +204,38 @@ function calculateFPYSummary_FINAL() {
   let grandDefects = 0;
 
   Object.keys(data).sort().forEach(function (key) {
-    const parts = key.split('|');
-    const year = parts[0];
-    const month = parts[1];
-    const total = data[key].total;
-    const defects = data[key].defects;
-    const fpy = total > 0 ? (total - defects) / total : 0;
+    const row = data[key];
+    const fpy = row.total > 0 ? (row.total - row.defects) / row.total : 0;
 
-    output.push([year, month, total, defects, fpy]);
+    output.push([
+      row.productLine,
+      row.year,
+      row.month,
+      row.total,
+      row.defects,
+      fpy
+    ]);
 
-    grandTotal += total;
-    grandDefects += defects;
+    grandTotal += row.total;
+    grandDefects += row.defects;
   });
 
   output.push([
     'TOTAL',
+    '',
     '',
     grandTotal,
     grandDefects,
     grandTotal > 0 ? (grandTotal - grandDefects) / grandTotal : 0
   ]);
 
-  output.push(['DEBUG totalProcessed', totalProcessed, '', '', '']);
-  output.push(['DEBUG matchedTemplate', matchedTemplate, '', '', '']);
-  output.push(['DEBUG missingInspectionId', missingInspectionId, '', '', '']);
-  output.push(['DEBUG detailFailures', detailFailures, '', '', '']);
+  output.push(['DEBUG totalProcessed', totalProcessed, '', '', '', '']);
+  output.push(['DEBUG matchedTemplate', matchedTemplate, '', '', '', '']);
+  output.push(['DEBUG missingInspectionId', missingInspectionId, '', '', '', '']);
+  output.push(['DEBUG detailFailures', detailFailures, '', '', '', '']);
 
   sheet.getRange(1, 1, output.length, output[0].length).setValues(output);
 
   // Format FPY column as percentage
-  sheet.getRange(2, 5, output.length - 1, 1).setNumberFormat('0.00%');
+  sheet.getRange(2, 6, output.length - 1, 1).setNumberFormat('0.00%');
 }
