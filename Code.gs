@@ -1,22 +1,52 @@
 function calculateFPYSummary_FINAL() {
-  const token = 'scapi_Rr6jleu8o5EgnXnDi_UriXsH-xta_zGELOJtc0ObUdFweWlrtvJCm1-DCIPLyNZxGLn1CREeZGLu3IybDIX-VpP3o-QmUOQewXhkL3hq8QBLAGnRK7bnTts1_odUZ0HZELTJZlGA1au36uGQ-85dK_V17Jxpayn6g85aJHCgdgY';
+  const token = 'PASTE_TOKEN_HERE';
   const BASE = 'https://api.safetyculture.io';
+
+  // Add future templates here
   const TEMPLATE_MAP = {
-    template_9f49d4f7e3924b9fa36bcc249f5ea96a: 'ARU',
-    template_95a16e28e5184839899cf3dfb6dbf286: 'CSC',
-    template_db8cb7b6b670439088dfa3f780d020d4: 'MSC',
-    template_eeefdf55f60440e583f20e91db821b8d: 'HGRH'
+    'template_9f49d4f7e3924b9fa36bcc249f5ea96a': 'ARU',
+    'template_95a16e28e5184839899cf3dfb6dbf286': 'CSC',
+    'template_db8cb7b6b670439088dfa3f780d020d4': 'MSC',
+    'template_eeefdf55f60440e583f20e91db821b8d': 'HGRH'
   };
 
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  const PRODUCTS = ['ARU', 'CSC', 'HGRH', 'MSC'];
+
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Sheet1');
+  if (!sheet) throw new Error('Sheet1 not found.');
+
+  // Clear current sheet and build report layout directly
   sheet.clear();
 
-  const output = [];
-  output.push(['Product Line', 'Year', 'Month', 'Total', 'Defects', 'FPY']);
+  // Header layout
+  sheet.getRange('A1').setValue('Month/Year');
+
+  sheet.getRange('B2:D2').merge().setValue('ARU');
+  sheet.getRange('E2:G2').merge().setValue('CSC');
+  sheet.getRange('H2:J2').merge().setValue('HGRH');
+  sheet.getRange('K2:M2').merge().setValue('MSC');
+
+  sheet.getRange('B3').setValue('Total Inspected');
+  sheet.getRange('C3').setValue('Defects');
+  sheet.getRange('D3').setValue('FPY Inspection');
+
+  sheet.getRange('E3').setValue('Total Inspected');
+  sheet.getRange('F3').setValue('Defects');
+  sheet.getRange('G3').setValue('FPY Inspection');
+
+  sheet.getRange('H3').setValue('Total Inspected');
+  sheet.getRange('I3').setValue('Defects');
+  sheet.getRange('J3').setValue('FPY Inspection');
+
+  sheet.getRange('K3').setValue('Total Inspected');
+  sheet.getRange('L3').setValue('Defects');
+  sheet.getRange('M3').setValue('FPY Inspection');
 
   let url = BASE + '/feed/inspections?modified_after=2026-01-01T00:00:00Z&limit=100';
 
   const data = {};
+  const monthKeys = [];
+
   let totalProcessed = 0;
   let matchedTemplate = 0;
   let missingInspectionId = 0;
@@ -162,6 +192,12 @@ function calculateFPYSummary_FINAL() {
       if (isNaN(d.getTime())) continue;
       if (d.getFullYear() < 2026) continue;
 
+      const year = String(d.getFullYear());
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const monthKey = year + '-' + month;
+
+      if (!monthKeys.includes(monthKey)) monthKeys.push(monthKey);
+
       const detail = fetchInspectionDetail(inspectionId);
       if (!detail) {
         detailFailures++;
@@ -175,15 +211,10 @@ function calculateFPYSummary_FINAL() {
 
       const defectFound = String(defectAnswer).trim().toLowerCase() === 'yes';
 
-      const year = String(d.getFullYear());
-      const month = String(d.getMonth() + 1);
-      const key = productLine + '|' + year + '|' + month;
+      const key = productLine + '|' + monthKey;
 
       if (!data[key]) {
         data[key] = {
-          productLine: productLine,
-          year: year,
-          month: month,
           total: 0,
           defects: 0
         };
@@ -200,114 +231,16 @@ function calculateFPYSummary_FINAL() {
       : null;
   }
 
-  let grandTotal = 0;
-  let grandDefects = 0;
-
-  Object.keys(data).sort().forEach(function (key) {
-    const row = data[key];
-    const fpy = row.total > 0 ? (row.total - row.defects) / row.total : 0;
-
-    output.push([
-      row.productLine,
-      row.year,
-      row.month,
-      row.total,
-      row.defects,
-      fpy
-    ]);
-
-    grandTotal += row.total;
-    grandDefects += row.defects;
-  });
-
-  output.push([
-    'TOTAL',
-    '',
-    '',
-    grandTotal,
-    grandDefects,
-    grandTotal > 0 ? (grandTotal - grandDefects) / grandTotal : 0
-  ]);
-
-  output.push(['DEBUG totalProcessed', totalProcessed, '', '', '', '']);
-  output.push(['DEBUG matchedTemplate', matchedTemplate, '', '', '', '']);
-  output.push(['DEBUG missingInspectionId', missingInspectionId, '', '', '', '']);
-  output.push(['DEBUG detailFailures', detailFailures, '', '', '', '']);
-
-  sheet.getRange(1, 1, output.length, output[0].length).setValues(output);
-
-  // Format FPY column as percentage
-  sheet.getRange(2, 6, output.length - 1, 1).setNumberFormat('0.00%');
-
-  // Write the dashboard matrix layout on the FPY Report tab.
-  writeFPYMatrixLayout();
-}
-
-function writeFPYMatrixLayout() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sourceSheet = ss.getSheetByName('Sheet1');
-  const targetSheet = ss.getSheetByName('FPY Report');
-
-  if (!sourceSheet) throw new Error('Sheet1 not found.');
-  if (!targetSheet) throw new Error('FPY Report not found.');
-
-  const sourceData = sourceSheet.getDataRange().getValues();
-  if (sourceData.length < 2) throw new Error('No source data found on Sheet1.');
-
-  const headers = sourceData[0];
-  const rows = sourceData.slice(1);
-
-  const colIndex = {
-    product: headers.indexOf('Product Line'),
-    year: headers.indexOf('Year'),
-    month: headers.indexOf('Month'),
-    total: headers.indexOf('Total'),
-    defects: headers.indexOf('Defects'),
-    fpy: headers.indexOf('FPY')
-  };
-
-  for (const [key, idx] of Object.entries(colIndex)) {
-    if (idx === -1) throw new Error('Missing column in Sheet1: ' + key);
-  }
-
-  const products = ['ARU', 'CSC', 'HGRH', 'MSC'];
-  const monthKeys = [];
-  const dataMap = {};
-
-  rows.forEach(function (r) {
-    const product = r[colIndex.product];
-    const year = r[colIndex.year];
-    const month = r[colIndex.month];
-
-    if (!products.includes(product)) return;
-    if (!year || month === '' || month == null) return;
-
-    const monthNum = Number(month);
-    const monthKey = year + '-' + String(monthNum).padStart(2, '0');
-
-    if (!monthKeys.includes(monthKey)) monthKeys.push(monthKey);
-
-    dataMap[product + '|' + monthKey] = {
-      total: Number(r[colIndex.total]) || 0,
-      defects: Number(r[colIndex.defects]) || 0,
-      fpy: Number(r[colIndex.fpy]) || 0
-    };
-  });
-
   monthKeys.sort();
 
-  // Keep report headers; clear only the body area.
-  targetSheet.getRange('A4:M1000').clearContent();
-
-  const monthLabelValues = monthKeys.map(function (monthKey) {
-    const parts = monthKey.split('-');
-    const year = parts[0];
-    const month = parts[1];
-    return [month + '/' + year.slice(2)];
+  // Write month/year labels
+  const monthLabelValues = monthKeys.map(function (mk) {
+    const parts = mk.split('-');
+    return [parts[1] + '/' + parts[0].slice(2)];
   });
 
   if (monthLabelValues.length) {
-    targetSheet.getRange(4, 1, monthLabelValues.length, 1).setValues(monthLabelValues);
+    sheet.getRange(4, 1, monthLabelValues.length, 1).setValues(monthLabelValues);
   }
 
   const startCols = {
@@ -317,22 +250,45 @@ function writeFPYMatrixLayout() {
     MSC: 11
   };
 
-  products.forEach(function (product) {
-    const out = monthKeys.map(function (monthKey) {
-      const record = dataMap[product + '|' + monthKey] || { total: 0, defects: 0, fpy: 0 };
-      return [record.total, record.defects, record.fpy];
+  PRODUCTS.forEach(function (product) {
+    const out = monthKeys.map(function (mk) {
+      const record = data[product + '|' + mk] || { total: 0, defects: 0 };
+      const fpy = record.total > 0 ? (record.total - record.defects) / record.total : 0;
+      return [record.total, record.defects, fpy];
     });
 
     if (out.length) {
-      targetSheet.getRange(4, startCols[product], out.length, 3).setValues(out);
+      sheet.getRange(4, startCols[product], out.length, 3).setValues(out);
     }
   });
 
-  // Only FPY columns are percentages.
+  // Format only FPY columns as percent
   if (monthKeys.length) {
-    targetSheet.getRange(4, 4, monthKeys.length, 1).setNumberFormat('0.00%');
-    targetSheet.getRange(4, 7, monthKeys.length, 1).setNumberFormat('0.00%');
-    targetSheet.getRange(4, 10, monthKeys.length, 1).setNumberFormat('0.00%');
-    targetSheet.getRange(4, 13, monthKeys.length, 1).setNumberFormat('0.00%');
+    sheet.getRange(4, 4, monthKeys.length, 1).setNumberFormat('0.00%');   // D
+    sheet.getRange(4, 7, monthKeys.length, 1).setNumberFormat('0.00%');   // G
+    sheet.getRange(4, 10, monthKeys.length, 1).setNumberFormat('0.00%');  // J
+    sheet.getRange(4, 13, monthKeys.length, 1).setNumberFormat('0.00%');  // M
   }
+
+  // Leave count columns as plain numbers
+  if (monthKeys.length) {
+    sheet.getRange(4, 2, monthKeys.length, 2).setNumberFormat('0');
+    sheet.getRange(4, 5, monthKeys.length, 2).setNumberFormat('0');
+    sheet.getRange(4, 8, monthKeys.length, 2).setNumberFormat('0');
+    sheet.getRange(4, 11, monthKeys.length, 2).setNumberFormat('0');
+  }
+
+  // Basic formatting
+  sheet.getRange('A1:M3').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('A1:M' + Math.max(4, monthKeys.length + 3)).setBorder(true, true, true, true, true, true);
+
+  // Debug block under the matrix
+  const debugStartRow = Math.max(6, monthKeys.length + 6);
+  const debugOutput = [
+    ['DEBUG totalProcessed', totalProcessed],
+    ['DEBUG matchedTemplate', matchedTemplate],
+    ['DEBUG missingInspectionId', missingInspectionId],
+    ['DEBUG detailFailures', detailFailures]
+  ];
+  sheet.getRange(debugStartRow, 1, debugOutput.length, 2).setValues(debugOutput);
 }
