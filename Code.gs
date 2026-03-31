@@ -206,8 +206,6 @@ function calculateFPYSummary_FINAL() {
 
       if (!monthlyData[key]) {
         monthlyData[key] = { total: 0, defects: 0 };
-      if (!data[key]) {
-        data[key] = { total: 0, defects: 0 };
       }
 
       monthlyData[key].total++;
@@ -226,18 +224,19 @@ function calculateFPYSummary_FINAL() {
 
   monthKeys.sort();
 
+  const startCols = {
+    ARU: 2,
+    CSC: 5,
+    HGRH: 8,
+    MSC: 11
+  };
+
   // Plant average / yearly values
   PRODUCTS.forEach(function (product) {
-    const yearlyTotal = yearTotals[product].total;
-    const yearlyDefects = yearTotals[product].defects;
+    const yearlyTotal = yearlyTotals[product].total;
+    const yearlyDefects = yearlyTotals[product].defects;
     const yearlyFPY = yearlyTotal > 0 ? (yearlyTotal - yearlyDefects) / yearlyTotal : 0;
-
-    const startCol = {
-      ARU: 2,
-      CSC: 5,
-      HGRH: 8,
-      MSC: 11
-    }[product];
+    const startCol = startCols[product];
 
     // Row 4 = current year totals
     sheet.getRange(4, startCol).setValue(yearlyTotal);
