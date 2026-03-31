@@ -2,7 +2,6 @@ function calculateFPYSummary_FINAL() {
   const token = 'scapi_Rr6jleu8o5EgnXnDi_UriXsH-xta_zGELOJtc0ObUdFweWlrtvJCm1-DCIPLyNZxGLn1CREeZGLu3IybDIX-VpP3o-QmUOQewXhkL3hq8QBLAGnRK7bnTts1_odUZ0HZELTJZlGA1au36uGQ-85dK_V17Jxpayn6g85aJHCgdgY';
   const BASE = 'https://api.safetyculture.io';
 
-  // Add future templates here
   const TEMPLATE_MAP = {
     'template_9f49d4f7e3924b9fa36bcc249f5ea96a': 'ARU',
     'template_95a16e28e5184839899cf3dfb6dbf286': 'CSC',
@@ -17,18 +16,16 @@ function calculateFPYSummary_FINAL() {
 
   sheet.clear();
 
-  // Top summary labels
-  sheet.getRange('A1').setValue('Total Inspection\nCurrent Year');
-  sheet.getRange('C1').setValue('Average FPY\nInspection Year');
-  sheet.getRange('A2').setValue('Month/Year');
+  // Build layout to match screenshot
+  sheet.getRange('A1').setValue('Month/Year');
+  sheet.getRange('A2').setValue('Plant Average');
+  sheet.getRange('A4').setValue('Current Year Total');
 
-  // Product headers
   sheet.getRange('B2:D2').merge().setValue('ARU');
   sheet.getRange('E2:G2').merge().setValue('CSC');
   sheet.getRange('H2:J2').merge().setValue('HGRH');
   sheet.getRange('K2:M2').merge().setValue('MSC');
 
-  // Column headers
   sheet.getRange('B3').setValue('Total Inspected');
   sheet.getRange('C3').setValue('Defects');
   sheet.getRange('D3').setValue('FPY Inspection');
@@ -47,17 +44,12 @@ function calculateFPYSummary_FINAL() {
 
   let url = BASE + '/feed/inspections?modified_after=2026-01-01T00:00:00Z&limit=100';
 
-  const data = {};
-  const yearTotals = {};
+  const monthlyData = {};
+  const yearlyTotals = {};
   const monthKeys = [];
 
-  let totalProcessed = 0;
-  let matchedTemplate = 0;
-  let missingInspectionId = 0;
-  let detailFailures = 0;
-
   PRODUCTS.forEach(function (product) {
-    yearTotals[product] = { total: 0, defects: 0 };
+    yearlyTotals[product] = { total: 0, defects: 0 };
   });
 
   function extractAnswerFromResponses(responses) {
@@ -177,17 +169,11 @@ function calculateFPYSummary_FINAL() {
     if (!inspections.length) break;
 
     for (const inspection of inspections) {
-      totalProcessed++;
-
       const productLine = TEMPLATE_MAP[inspection.template_id];
       if (!productLine) continue;
-      matchedTemplate++;
 
       const inspectionId = inspection.inspection_id || inspection.audit_id || inspection.id;
-      if (!inspectionId) {
-        missingInspectionId++;
-        continue;
-      }
+      if (!inspectionId) continue;
 
       const dateStr =
         inspection.date_completed ||
@@ -207,10 +193,7 @@ function calculateFPYSummary_FINAL() {
       if (!monthKeys.includes(monthKey)) monthKeys.push(monthKey);
 
       const detail = fetchInspectionDetail(inspectionId);
-      if (!detail) {
-        detailFailures++;
-        continue;
-      }
+      if (!detail) continue;
 
       const defectAnswer =
         findDefectAnswer(detail.header_items) ||
@@ -221,18 +204,15 @@ function calculateFPYSummary_FINAL() {
 
       const key = productLine + '|' + monthKey;
 
-      if (!data[key]) {
-        data[key] = {
-          total: 0,
-          defects: 0
-        };
+      if (!monthlyData[key]) {
+        monthlyData[key] = { total: 0, defects: 0 };
       }
 
-      data[key].total++;
-      if (defectFound) data[key].defects++;
+      monthlyData[key].total++;
+      if (defectFound) monthlyData[key].defects++;
 
-      yearTotals[productLine].total++;
-      if (defectFound) yearTotals[productLine].defects++;
+      yearlyTotals[productLine].total++;
+      if (defectFound) yearlyTotals[productLine].defects++;
 
       Utilities.sleep(100);
     }
@@ -244,15 +224,7 @@ function calculateFPYSummary_FINAL() {
 
   monthKeys.sort();
 
-  const monthLabelValues = monthKeys.map(function (mk) {
-    const parts = mk.split('-');
-    return [parts[1] + '/' + parts[0].slice(2)];
-  });
-
-  if (monthLabelValues.length) {
-    sheet.getRange(4, 1, monthLabelValues.length, 1).setValues(monthLabelValues);
-  }
-
+  // Plant average row: yearly FPY by product line
   const startCols = {
     ARU: 2,
     CSC: 5,
@@ -261,61 +233,109 @@ function calculateFPYSummary_FINAL() {
   };
 
   PRODUCTS.forEach(function (product) {
+    const yearlyTotal = yearlyTotals[product].total;
+    const yearlyDefects = yearlyTotals[product].defects;
+    const yearlyFPY = yearlyTotal > 0 ? (yearlyTotal - yearlyDefects) / yearlyTotal : 0;
+
+    const col = startCols[product];
+
+    // Plant average row
+    sheet.getRange(2, col).setValue(yearlyFPY);
+
+    // Current year total row
+    sheet.getRange(4, col).setValue(yearlyTotal);
+    sheet.getRange(4, col + 1).setValue(yearlyDefects);
+    sheet.getRange(4, col + 2).setValue(yearlyFPY);
+  });
+
+  // Monthly labels start row 5
+  const monthLabelValues = monthKeys.map(function (mk) {
+    const parts = mk.split('-');
+    return [parts[1] + '/' + parts[0].slice(2)];
+  });
+
+  if (monthLabelValues.length) {
+    sheet.getRange(5, 1, monthLabelValues.length, 1).setValues(monthLabelValues);
+  }
+
+  // Monthly data starts row 5
+  PRODUCTS.forEach(function (product) {
     const out = monthKeys.map(function (mk) {
-      const record = data[product + '|' + mk] || { total: 0, defects: 0 };
+      const record = monthlyData[product + '|' + mk] || { total: 0, defects: 0 };
       const fpy = record.total > 0 ? (record.total - record.defects) / record.total : 0;
       return [record.total, record.defects, fpy];
     });
 
     if (out.length) {
-      sheet.getRange(4, startCols[product], out.length, 3).setValues(out);
+      sheet.getRange(5, startCols[product], out.length, 3).setValues(out);
     }
-
-    // Top summary row values
-    const yearlyTotal = yearTotals[product].total;
-    const yearlyDefects = yearTotals[product].defects;
-    const yearlyFPY = yearlyTotal > 0 ? (yearlyTotal - yearlyDefects) / yearlyTotal : 0;
-
-    sheet.getRange(1, startCols[product], 1, 1).setValue(yearlyTotal);
-    sheet.getRange(1, startCols[product] + 2, 1, 1).setValue(yearlyFPY);
   });
 
-  if (monthKeys.length) {
-    // Count columns
-    sheet.getRange(4, 2, monthKeys.length, 2).setNumberFormat('0');
-    sheet.getRange(4, 5, monthKeys.length, 2).setNumberFormat('0');
-    sheet.getRange(4, 8, monthKeys.length, 2).setNumberFormat('0');
-    sheet.getRange(4, 11, monthKeys.length, 2).setNumberFormat('0');
-
-    // Percent columns
-    sheet.getRange(4, 4, monthKeys.length, 1).setNumberFormat('0.00%');
-    sheet.getRange(4, 7, monthKeys.length, 1).setNumberFormat('0.00%');
-    sheet.getRange(4, 10, monthKeys.length, 1).setNumberFormat('0.00%');
-    sheet.getRange(4, 13, monthKeys.length, 1).setNumberFormat('0.00%');
-  }
-
-  // Top row formatting
-  sheet.getRange('B1').setNumberFormat('0');
-  sheet.getRange('D1').setNumberFormat('0.00%');
-  sheet.getRange('E1').setNumberFormat('0');
-  sheet.getRange('G1').setNumberFormat('0.00%');
-  sheet.getRange('H1').setNumberFormat('0');
-  sheet.getRange('J1').setNumberFormat('0.00%');
-  sheet.getRange('K1').setNumberFormat('0');
-  sheet.getRange('M1').setNumberFormat('0.00%');
+  const monthlyRowCount = monthKeys.length;
+  const lastDataRow = Math.max(5, monthlyRowCount + 4);
 
   // Formatting
-  sheet.getRange('A1:M3').setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange('A1:M' + Math.max(4, monthKeys.length + 3)).setBorder(true, true, true, true, true, true);
-  sheet.getRange('A1:A2').setWrap(true);
-  sheet.setRowHeight(1, 42);
+  if (monthlyRowCount > 0) {
+    // Monthly count columns
+    sheet.getRange(5, 2, monthlyRowCount, 2).setNumberFormat('0');
+    sheet.getRange(5, 5, monthlyRowCount, 2).setNumberFormat('0');
+    sheet.getRange(5, 8, monthlyRowCount, 2).setNumberFormat('0');
+    sheet.getRange(5, 11, monthlyRowCount, 2).setNumberFormat('0');
 
-  const debugStartRow = Math.max(8, monthKeys.length + 6);
-  const debugOutput = [
-    ['DEBUG totalProcessed', totalProcessed],
-    ['DEBUG matchedTemplate', matchedTemplate],
-    ['DEBUG missingInspectionId', missingInspectionId],
-    ['DEBUG detailFailures', detailFailures]
-  ];
-  sheet.getRange(debugStartRow, 1, debugOutput.length, 2).setValues(debugOutput);
+    // Monthly FPY columns
+    sheet.getRange(5, 4, monthlyRowCount, 1).setNumberFormat('0.00%');
+    sheet.getRange(5, 7, monthlyRowCount, 1).setNumberFormat('0.00%');
+    sheet.getRange(5, 10, monthlyRowCount, 1).setNumberFormat('0.00%');
+    sheet.getRange(5, 13, monthlyRowCount, 1).setNumberFormat('0.00%');
+  }
+
+  // Current year totals row
+  sheet.getRange('B4').setNumberFormat('0');
+  sheet.getRange('C4').setNumberFormat('0');
+  sheet.getRange('D4').setNumberFormat('0.00%');
+
+  sheet.getRange('E4').setNumberFormat('0');
+  sheet.getRange('F4').setNumberFormat('0');
+  sheet.getRange('G4').setNumberFormat('0.00%');
+
+  sheet.getRange('H4').setNumberFormat('0');
+  sheet.getRange('I4').setNumberFormat('0');
+  sheet.getRange('J4').setNumberFormat('0.00%');
+
+  sheet.getRange('K4').setNumberFormat('0');
+  sheet.getRange('L4').setNumberFormat('0');
+  sheet.getRange('M4').setNumberFormat('0.00%');
+
+  // Plant average row
+  sheet.getRange('B2').setNumberFormat('0.00%');
+  sheet.getRange('E2').setNumberFormat('0.00%');
+  sheet.getRange('H2').setNumberFormat('0.00%');
+  sheet.getRange('K2').setNumberFormat('0.00%');
+
+  // Borders and layout
+  sheet.getRange('A1:M' + lastDataRow).setBorder(
+    true, true, true, true, true, true,
+    'black',
+    SpreadsheetApp.BorderStyle.SOLID
+  );
+
+  sheet.getRange('A1:M4').setFontWeight('bold').setHorizontalAlignment('center');
+  sheet.getRange('B2:D2').setHorizontalAlignment('center');
+  sheet.getRange('E2:G2').setHorizontalAlignment('center');
+  sheet.getRange('H2:J2').setHorizontalAlignment('center');
+  sheet.getRange('K2:M2').setHorizontalAlignment('center');
+  sheet.getRange('A4:A' + lastDataRow).setHorizontalAlignment('left');
+
+  // Auto resize
+  for (let col = 1; col <= 13; col++) {
+    sheet.autoResizeColumn(col);
+  }
+
+  sheet.setColumnWidth(1, Math.max(sheet.getColumnWidth(1), 140));
+
+  // Row sizes
+  sheet.setRowHeight(1, 28);
+  sheet.setRowHeight(2, 28);
+  sheet.setRowHeight(3, 28);
+  sheet.setRowHeight(4, 28);
 }
