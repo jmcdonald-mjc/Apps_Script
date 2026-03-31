@@ -15,17 +15,20 @@ function calculateFPYSummary_FINAL() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Sheet1');
   if (!sheet) throw new Error('Sheet1 not found.');
 
-  // Clear current sheet and build report layout directly
   sheet.clear();
 
-  // Header layout
-  sheet.getRange('A1').setValue('Month/Year');
+  // Top summary labels
+  sheet.getRange('A1').setValue('Total Inspection\nCurrent Year');
+  sheet.getRange('C1').setValue('Average FPY\nInspection Year');
+  sheet.getRange('A2').setValue('Month/Year');
 
+  // Product headers
   sheet.getRange('B2:D2').merge().setValue('ARU');
   sheet.getRange('E2:G2').merge().setValue('CSC');
   sheet.getRange('H2:J2').merge().setValue('HGRH');
   sheet.getRange('K2:M2').merge().setValue('MSC');
 
+  // Column headers
   sheet.getRange('B3').setValue('Total Inspected');
   sheet.getRange('C3').setValue('Defects');
   sheet.getRange('D3').setValue('FPY Inspection');
@@ -45,12 +48,17 @@ function calculateFPYSummary_FINAL() {
   let url = BASE + '/feed/inspections?modified_after=2026-01-01T00:00:00Z&limit=100';
 
   const data = {};
+  const yearTotals = {};
   const monthKeys = [];
 
   let totalProcessed = 0;
   let matchedTemplate = 0;
   let missingInspectionId = 0;
   let detailFailures = 0;
+
+  PRODUCTS.forEach(function (product) {
+    yearTotals[product] = { total: 0, defects: 0 };
+  });
 
   function extractAnswerFromResponses(responses) {
     if (!responses) return '';
@@ -223,6 +231,9 @@ function calculateFPYSummary_FINAL() {
       data[key].total++;
       if (defectFound) data[key].defects++;
 
+      yearTotals[productLine].total++;
+      if (defectFound) yearTotals[productLine].defects++;
+
       Utilities.sleep(100);
     }
 
@@ -233,7 +244,6 @@ function calculateFPYSummary_FINAL() {
 
   monthKeys.sort();
 
-  // Write month/year labels
   const monthLabelValues = monthKeys.map(function (mk) {
     const parts = mk.split('-');
     return [parts[1] + '/' + parts[0].slice(2)];
@@ -260,30 +270,47 @@ function calculateFPYSummary_FINAL() {
     if (out.length) {
       sheet.getRange(4, startCols[product], out.length, 3).setValues(out);
     }
+
+    // Top summary row values
+    const yearlyTotal = yearTotals[product].total;
+    const yearlyDefects = yearTotals[product].defects;
+    const yearlyFPY = yearlyTotal > 0 ? (yearlyTotal - yearlyDefects) / yearlyTotal : 0;
+
+    sheet.getRange(1, startCols[product], 1, 1).setValue(yearlyTotal);
+    sheet.getRange(1, startCols[product] + 2, 1, 1).setValue(yearlyFPY);
   });
 
-  // Format only FPY columns as percent
   if (monthKeys.length) {
-    sheet.getRange(4, 4, monthKeys.length, 1).setNumberFormat('0.00%');   // D
-    sheet.getRange(4, 7, monthKeys.length, 1).setNumberFormat('0.00%');   // G
-    sheet.getRange(4, 10, monthKeys.length, 1).setNumberFormat('0.00%');  // J
-    sheet.getRange(4, 13, monthKeys.length, 1).setNumberFormat('0.00%');  // M
-  }
-
-  // Leave count columns as plain numbers
-  if (monthKeys.length) {
+    // Count columns
     sheet.getRange(4, 2, monthKeys.length, 2).setNumberFormat('0');
     sheet.getRange(4, 5, monthKeys.length, 2).setNumberFormat('0');
     sheet.getRange(4, 8, monthKeys.length, 2).setNumberFormat('0');
     sheet.getRange(4, 11, monthKeys.length, 2).setNumberFormat('0');
+
+    // Percent columns
+    sheet.getRange(4, 4, monthKeys.length, 1).setNumberFormat('0.00%');
+    sheet.getRange(4, 7, monthKeys.length, 1).setNumberFormat('0.00%');
+    sheet.getRange(4, 10, monthKeys.length, 1).setNumberFormat('0.00%');
+    sheet.getRange(4, 13, monthKeys.length, 1).setNumberFormat('0.00%');
   }
 
-  // Basic formatting
+  // Top row formatting
+  sheet.getRange('B1').setNumberFormat('0');
+  sheet.getRange('D1').setNumberFormat('0.00%');
+  sheet.getRange('E1').setNumberFormat('0');
+  sheet.getRange('G1').setNumberFormat('0.00%');
+  sheet.getRange('H1').setNumberFormat('0');
+  sheet.getRange('J1').setNumberFormat('0.00%');
+  sheet.getRange('K1').setNumberFormat('0');
+  sheet.getRange('M1').setNumberFormat('0.00%');
+
+  // Formatting
   sheet.getRange('A1:M3').setFontWeight('bold').setHorizontalAlignment('center');
   sheet.getRange('A1:M' + Math.max(4, monthKeys.length + 3)).setBorder(true, true, true, true, true, true);
+  sheet.getRange('A1:A2').setWrap(true);
+  sheet.setRowHeight(1, 42);
 
-  // Debug block under the matrix
-  const debugStartRow = Math.max(6, monthKeys.length + 6);
+  const debugStartRow = Math.max(8, monthKeys.length + 6);
   const debugOutput = [
     ['DEBUG totalProcessed', totalProcessed],
     ['DEBUG matchedTemplate', matchedTemplate],
