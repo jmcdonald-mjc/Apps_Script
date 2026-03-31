@@ -9,21 +9,17 @@ function calculateFPYSummary_FINAL() {
   const output = [];
   output.push(['Year', 'Month', 'Total', 'Defects', 'FPY']);
 
-  // Use FEED endpoint because it was the one that actually returned the full dataset.
-  // Do NOT filter template_id in the URL because that caused "template_id is not allowed".
   let url = BASE + '/feed/inspections?modified_after=2026-01-01T00:00:00Z&limit=100';
 
   const data = {};
   let totalProcessed = 0;
   let matchedTemplate = 0;
-  let missingAuditId = 0;
+  let missingInspectionId = 0;
   let detailFailures = 0;
 
   function extractAnswerFromResponses(responses) {
     if (!responses) return '';
 
-    // Most important case from your debug:
-    // { selected: [ { label: "Yes" } ] }
     if (
       responses.selected &&
       Array.isArray(responses.selected) &&
@@ -38,7 +34,6 @@ function calculateFPYSummary_FINAL() {
       }
     }
 
-    // Fallback in case responses is an array-like structure
     if (Array.isArray(responses) && responses.length > 0) {
       const first = responses[0];
 
@@ -75,7 +70,6 @@ function calculateFPYSummary_FINAL() {
 
       const label = String(item.label || '').trim().toLowerCase();
 
-      // Match the actual API question text, not the CSV header text.
       if (
         label === 'were there any defects found?' ||
         label.includes('were there any defects found')
@@ -91,6 +85,30 @@ function calculateFPYSummary_FINAL() {
     }
 
     return '';
+  }
+
+  function fetchInspectionDetail(id) {
+    const candidates = [
+      BASE + '/audits/' + encodeURIComponent(id),
+      BASE + '/inspections/v1/inspections/' + encodeURIComponent(id)
+    ];
+
+    for (const endpoint of candidates) {
+      const res = UrlFetchApp.fetch(endpoint, {
+        method: 'get',
+        headers: {
+          Authorization: 'Bearer ' + token,
+          Accept: 'application/json'
+        },
+        muteHttpExceptions: true
+      });
+
+      if (res.getResponseCode() === 200) {
+        return JSON.parse(res.getContentText());
+      }
+    }
+
+    return null;
   }
 
   while (url) {
@@ -118,75 +136,51 @@ function calculateFPYSummary_FINAL() {
     for (const inspection of inspections) {
       totalProcessed++;
 
-      // Template filter stays in script, not in URL
       if (inspection.template_id !== TEMPLATE_ID) continue;
       matchedTemplate++;
 
-      const auditId = inspection.audit_id;
-      if (!auditId) {
-        missingAuditId++;
+      const inspectionId = inspection.inspection_id || inspection.audit_id || inspection.id;
+      if (!inspectionId) {
+        missingInspectionId++;
         continue;
       }
 
-      try {
-        const detailRes = UrlFetchApp.fetch(
-          BASE + '/audits/' + encodeURIComponent(auditId),
-          {
-            method: 'get',
-            headers: {
-              Authorization: 'Bearer ' + token,
-              Accept: 'application/json'
-            },
-            muteHttpExceptions: true
-          }
-        );
+      const dateStr =
+        inspection.date_completed ||
+        inspection.modified_at ||
+        inspection.created_at;
 
-        const detailCode = detailRes.getResponseCode();
-        const detailText = detailRes.getContentText();
+      if (!dateStr) continue;
 
-        if (detailCode !== 200) {
-          detailFailures++;
-          continue;
-        }
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) continue;
+      if (d.getFullYear() < 2026) continue;
 
-        const detail = JSON.parse(detailText);
-
-        // Prefer completed date for reporting; fall back if needed
-        const dateStr =
-          detail.audit_data?.date_completed ||
-          inspection.date_completed ||
-          inspection.modified_at;
-
-        if (!dateStr) continue;
-
-        const d = new Date(dateStr);
-        if (isNaN(d.getTime())) continue;
-
-        // Keep only 2026 forward
-        if (d.getFullYear() < 2026) continue;
-
-        const year = String(d.getFullYear());
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const key = year + '|' + month;
-
-        if (!data[key]) {
-          data[key] = { total: 0, defects: 0 };
-        }
-
-        const defectAnswer =
-          findDefectAnswer(detail.header_items) ||
-          findDefectAnswer(detail.items) ||
-          findDefectAnswer(detail.audit_data?.items);
-
-        const defectFound = String(defectAnswer).trim().toLowerCase() === 'yes';
-
-        data[key].total++;
-        if (defectFound) data[key].defects++;
-
-        Utilities.sleep(100);
-      } catch (err) {
+      const detail = fetchInspectionDetail(inspectionId);
+      if (!detail) {
         detailFailures++;
+        continue;
       }
+
+      const defectAnswer =
+        findDefectAnswer(detail.header_items) ||
+        findDefectAnswer(detail.items) ||
+        findDefectAnswer(detail.audit_data && detail.audit_data.items);
+
+      const defectFound = String(defectAnswer).trim().toLowerCase() === 'yes';
+
+      const year = String(d.getFullYear());
+      const month = String(d.getMonth());
+      const key = year + '|' + month;
+
+      if (!data[key]) {
+        data[key] = { total: 0, defects: 0 };
+      }
+
+      data[key].total++;
+      if (defectFound) data[key].defects++;
+
+      Utilities.sleep(100);
     }
 
     url = json.metadata && json.metadata.next_page
@@ -197,21 +191,19 @@ function calculateFPYSummary_FINAL() {
   let grandTotal = 0;
   let grandDefects = 0;
 
-  Object.keys(data)
-    .sort()
-    .forEach(function (key) {
-      const parts = key.split('|');
-      const year = parts[0];
-      const month = parts[1];
-      const total = data[key].total;
-      const defects = data[key].defects;
-      const fpy = total > 0 ? (total - defects) / total : 0;
+  Object.keys(data).sort().forEach(function (key) {
+    const parts = key.split('|');
+    const year = parts[0];
+    const month = parts[1];
+    const total = data[key].total;
+    const defects = data[key].defects;
+    const fpy = total > 0 ? (total - defects) / total : 0;
 
-      output.push([year, month, total, defects, fpy]);
+    output.push([year, month, total, defects, fpy]);
 
-      grandTotal += total;
-      grandDefects += defects;
-    });
+    grandTotal += total;
+    grandDefects += defects;
+  });
 
   output.push([
     'TOTAL',
@@ -223,8 +215,11 @@ function calculateFPYSummary_FINAL() {
 
   output.push(['DEBUG totalProcessed', totalProcessed, '', '', '']);
   output.push(['DEBUG matchedTemplate', matchedTemplate, '', '', '']);
-  output.push(['DEBUG missingAuditId', missingAuditId, '', '', '']);
+  output.push(['DEBUG missingInspectionId', missingInspectionId, '', '', '']);
   output.push(['DEBUG detailFailures', detailFailures, '', '', '']);
 
   sheet.getRange(1, 1, output.length, output[0].length).setValues(output);
+
+  // Format FPY column as percentage
+  sheet.getRange(2, 5, output.length - 1, 1).setNumberFormat('0.00%');
 }
