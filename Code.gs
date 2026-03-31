@@ -1,5 +1,5 @@
 function calculateFPYSummary_FINAL() {
-  const token = 'PASTE_TOKEN_HERE';
+  const token = 'scapi_Rr6jleu8o5EgnXnDi_UriXsH-xta_zGELOJtc0ObUdFweWlrtvJCm1-DCIPLyNZxGLn1CREeZGLu3IybDIX-VpP3o-QmUOQewXhkL3hq8QBLAGnRK7bnTts1_odUZ0HZELTJZlGA1au36uGQ-85dK_V17Jxpayn6g85aJHCgdgY';
   const BASE = 'https://api.safetyculture.io';
 
   // Add future templates here
