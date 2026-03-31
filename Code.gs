@@ -1,8 +1,7 @@
 function calculateFPYSummary_FINAL() {
-  const token = 'scapi_Rr6jleu8o5EgnXnDi_UriXsH-xta_zGELOJtc0ObUdFweWlrtvJCm1-DCIPLyNZxGLn1CREeZGLu3IybDIX-VpP3o-QmUOQewXhkL3hq8QBLAGnRK7bnTts1_odUZ0HZELTJZlGA1au36uGQ-85dK_V17Jxpayn6g85aJHCgdgY';
+  const token = 'PASTE_TOKEN_HERE';
   const BASE = 'https://api.safetyculture.io';
 
-  // Add future templates here
   const TEMPLATE_MAP = {
     'template_9f49d4f7e3924b9fa36bcc249f5ea96a': 'ARU',
     'template_95a16e28e5184839899cf3dfb6dbf286': 'CSC',
@@ -17,18 +16,16 @@ function calculateFPYSummary_FINAL() {
 
   sheet.clear();
 
-  // Top summary labels
-  sheet.getRange('A1').setValue('Total Inspection\nCurrent Year');
-  sheet.getRange('C1').setValue('Average FPY\nInspection Year');
-  sheet.getRange('A2').setValue('Month/Year');
+  // Layout
+  sheet.getRange('A1').setValue('Month/Year');
+  sheet.getRange('A2').setValue('Plant Average');
+  sheet.getRange('A4').setValue('Current Year Total');
 
-  // Product headers
   sheet.getRange('B2:D2').merge().setValue('ARU');
   sheet.getRange('E2:G2').merge().setValue('CSC');
   sheet.getRange('H2:J2').merge().setValue('HGRH');
   sheet.getRange('K2:M2').merge().setValue('MSC');
 
-  // Column headers
   sheet.getRange('B3').setValue('Total Inspected');
   sheet.getRange('C3').setValue('Defects');
   sheet.getRange('D3').setValue('FPY Inspection');
@@ -222,10 +219,7 @@ function calculateFPYSummary_FINAL() {
       const key = productLine + '|' + monthKey;
 
       if (!data[key]) {
-        data[key] = {
-          total: 0,
-          defects: 0
-        };
+        data[key] = { total: 0, defects: 0 };
       }
 
       data[key].total++;
@@ -244,13 +238,36 @@ function calculateFPYSummary_FINAL() {
 
   monthKeys.sort();
 
+  // Plant average / yearly values
+  PRODUCTS.forEach(function (product) {
+    const yearlyTotal = yearTotals[product].total;
+    const yearlyDefects = yearTotals[product].defects;
+    const yearlyFPY = yearlyTotal > 0 ? (yearlyTotal - yearlyDefects) / yearlyTotal : 0;
+
+    const startCol = {
+      ARU: 2,
+      CSC: 5,
+      HGRH: 8,
+      MSC: 11
+    }[product];
+
+    // Row 4 = current year totals
+    sheet.getRange(4, startCol).setValue(yearlyTotal);
+    sheet.getRange(4, startCol + 1).setValue(yearlyDefects);
+    sheet.getRange(4, startCol + 2).setValue(yearlyFPY);
+
+    // Row 2 = plant average / yearly FPY
+    sheet.getRange(2, startCol).setValue(yearlyFPY);
+  });
+
+  // Monthly rows start at row 5
   const monthLabelValues = monthKeys.map(function (mk) {
     const parts = mk.split('-');
     return [parts[1] + '/' + parts[0].slice(2)];
   });
 
   if (monthLabelValues.length) {
-    sheet.getRange(4, 1, monthLabelValues.length, 1).setValues(monthLabelValues);
+    sheet.getRange(5, 1, monthLabelValues.length, 1).setValues(monthLabelValues);
   }
 
   const startCols = {
@@ -268,49 +285,81 @@ function calculateFPYSummary_FINAL() {
     });
 
     if (out.length) {
-      sheet.getRange(4, startCols[product], out.length, 3).setValues(out);
+      sheet.getRange(5, startCols[product], out.length, 3).setValues(out);
     }
-
-    // Top summary row values
-    const yearlyTotal = yearTotals[product].total;
-    const yearlyDefects = yearTotals[product].defects;
-    const yearlyFPY = yearlyTotal > 0 ? (yearlyTotal - yearlyDefects) / yearlyTotal : 0;
-
-    sheet.getRange(1, startCols[product], 1, 1).setValue(yearlyTotal);
-    sheet.getRange(1, startCols[product] + 2, 1, 1).setValue(yearlyFPY);
   });
 
-  if (monthKeys.length) {
-    // Count columns
-    sheet.getRange(4, 2, monthKeys.length, 2).setNumberFormat('0');
-    sheet.getRange(4, 5, monthKeys.length, 2).setNumberFormat('0');
-    sheet.getRange(4, 8, monthKeys.length, 2).setNumberFormat('0');
-    sheet.getRange(4, 11, monthKeys.length, 2).setNumberFormat('0');
+  const monthlyRowCount = monthKeys.length;
+  const lastDataRow = Math.max(5, monthlyRowCount + 4);
 
-    // Percent columns
-    sheet.getRange(4, 4, monthKeys.length, 1).setNumberFormat('0.00%');
-    sheet.getRange(4, 7, monthKeys.length, 1).setNumberFormat('0.00%');
-    sheet.getRange(4, 10, monthKeys.length, 1).setNumberFormat('0.00%');
-    sheet.getRange(4, 13, monthKeys.length, 1).setNumberFormat('0.00%');
+  // Number formatting
+  if (monthlyRowCount > 0) {
+    sheet.getRange(5, 2, monthlyRowCount, 2).setNumberFormat('0');
+    sheet.getRange(5, 5, monthlyRowCount, 2).setNumberFormat('0');
+    sheet.getRange(5, 8, monthlyRowCount, 2).setNumberFormat('0');
+    sheet.getRange(5, 11, monthlyRowCount, 2).setNumberFormat('0');
+
+    sheet.getRange(5, 4, monthlyRowCount, 1).setNumberFormat('0.00%');
+    sheet.getRange(5, 7, monthlyRowCount, 1).setNumberFormat('0.00%');
+    sheet.getRange(5, 10, monthlyRowCount, 1).setNumberFormat('0.00%');
+    sheet.getRange(5, 13, monthlyRowCount, 1).setNumberFormat('0.00%');
   }
 
-  // Top row formatting
-  sheet.getRange('B1').setNumberFormat('0');
-  sheet.getRange('D1').setNumberFormat('0.00%');
-  sheet.getRange('E1').setNumberFormat('0');
-  sheet.getRange('G1').setNumberFormat('0.00%');
-  sheet.getRange('H1').setNumberFormat('0');
-  sheet.getRange('J1').setNumberFormat('0.00%');
-  sheet.getRange('K1').setNumberFormat('0');
-  sheet.getRange('M1').setNumberFormat('0.00%');
+  sheet.getRange('B4').setNumberFormat('0');
+  sheet.getRange('C4').setNumberFormat('0');
+  sheet.getRange('D4').setNumberFormat('0.00%');
 
-  // Formatting
+  sheet.getRange('E4').setNumberFormat('0');
+  sheet.getRange('F4').setNumberFormat('0');
+  sheet.getRange('G4').setNumberFormat('0.00%');
+
+  sheet.getRange('H4').setNumberFormat('0');
+  sheet.getRange('I4').setNumberFormat('0');
+  sheet.getRange('J4').setNumberFormat('0.00%');
+
+  sheet.getRange('K4').setNumberFormat('0');
+  sheet.getRange('L4').setNumberFormat('0');
+  sheet.getRange('M4').setNumberFormat('0.00%');
+
+  sheet.getRange('B2').setNumberFormat('0.00%');
+  sheet.getRange('E2').setNumberFormat('0.00%');
+  sheet.getRange('H2').setNumberFormat('0.00%');
+  sheet.getRange('K2').setNumberFormat('0.00%');
+
+  // Formatting and black borders
+  sheet.getRange('A1:M' + lastDataRow).setBorder(
+    true, true, true, true, true, true,
+    'black',
+    SpreadsheetApp.BorderStyle.SOLID
+  );
+
   sheet.getRange('A1:M3').setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange('A1:M' + Math.max(4, monthKeys.length + 3)).setBorder(true, true, true, true, true, true);
-  sheet.getRange('A1:A2').setWrap(true);
-  sheet.setRowHeight(1, 42);
+  sheet.getRange('B2:D2').setHorizontalAlignment('center');
+  sheet.getRange('E2:G2').setHorizontalAlignment('center');
+  sheet.getRange('H2:J2').setHorizontalAlignment('center');
+  sheet.getRange('K2:M2').setHorizontalAlignment('center');
+  sheet.getRange('A4:A' + lastDataRow).setHorizontalAlignment('right');
 
-  const debugStartRow = Math.max(8, monthKeys.length + 6);
+  // Auto resize columns A:M
+  for (let col = 1; col <= 13; col++) {
+    sheet.autoResizeColumn(col);
+  }
+
+  // Keep some columns from getting too narrow
+  sheet.setColumnWidth(1, Math.max(sheet.getColumnWidth(1), 120));
+  sheet.setColumnWidth(2, Math.max(sheet.getColumnWidth(2), 110));
+  sheet.setColumnWidth(5, Math.max(sheet.getColumnWidth(5), 110));
+  sheet.setColumnWidth(8, Math.max(sheet.getColumnWidth(8), 110));
+  sheet.setColumnWidth(11, Math.max(sheet.getColumnWidth(11), 110));
+
+  // Row heights
+  sheet.setRowHeight(1, 28);
+  sheet.setRowHeight(2, 28);
+  sheet.setRowHeight(3, 28);
+  sheet.setFrozenRows(4);
+
+  // Debug block
+  const debugStartRow = Math.max(9, lastDataRow + 2);
   const debugOutput = [
     ['DEBUG totalProcessed', totalProcessed],
     ['DEBUG matchedTemplate', matchedTemplate],
