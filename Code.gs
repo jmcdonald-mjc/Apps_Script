@@ -206,6 +206,8 @@ function calculateFPYSummary_FINAL() {
 
       if (!monthlyData[key]) {
         monthlyData[key] = { total: 0, defects: 0 };
+      if (!data[key]) {
+        data[key] = { total: 0, defects: 0 };
       }
 
       monthlyData[key].total++;
@@ -224,31 +226,29 @@ function calculateFPYSummary_FINAL() {
 
   monthKeys.sort();
 
-  // Plant average row: yearly FPY by product line
-  const startCols = {
-    ARU: 2,
-    CSC: 5,
-    HGRH: 8,
-    MSC: 11
-  };
-
+  // Plant average / yearly values
   PRODUCTS.forEach(function (product) {
-    const yearlyTotal = yearlyTotals[product].total;
-    const yearlyDefects = yearlyTotals[product].defects;
+    const yearlyTotal = yearTotals[product].total;
+    const yearlyDefects = yearTotals[product].defects;
     const yearlyFPY = yearlyTotal > 0 ? (yearlyTotal - yearlyDefects) / yearlyTotal : 0;
 
-    const col = startCols[product];
+    const startCol = {
+      ARU: 2,
+      CSC: 5,
+      HGRH: 8,
+      MSC: 11
+    }[product];
 
-    // Plant average row
-    sheet.getRange(2, col).setValue(yearlyFPY);
+    // Row 4 = current year totals
+    sheet.getRange(4, startCol).setValue(yearlyTotal);
+    sheet.getRange(4, startCol + 1).setValue(yearlyDefects);
+    sheet.getRange(4, startCol + 2).setValue(yearlyFPY);
 
-    // Current year total row
-    sheet.getRange(4, col).setValue(yearlyTotal);
-    sheet.getRange(4, col + 1).setValue(yearlyDefects);
-    sheet.getRange(4, col + 2).setValue(yearlyFPY);
+    // Row 2 = plant average / yearly FPY
+    sheet.getRange(2, startCol).setValue(yearlyFPY);
   });
 
-  // Monthly labels start row 5
+  // Monthly rows start at row 5
   const monthLabelValues = monthKeys.map(function (mk) {
     const parts = mk.split('-');
     return [parts[1] + '/' + parts[0].slice(2)];
