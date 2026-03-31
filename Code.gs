@@ -1,6 +1,12 @@
 function calculateFPYSummary_FINAL() {
   const token = 'scapi_Rr6jleu8o5EgnXnDi_UriXsH-xta_zGELOJtc0ObUdFweWlrtvJCm1-DCIPLyNZxGLn1CREeZGLu3IybDIX-VpP3o-QmUOQewXhkL3hq8QBLAGnRK7bnTts1_odUZ0HZELTJZlGA1au36uGQ-85dK_V17Jxpayn6g85aJHCgdgY';
-  const TEMPLATE_ID = 'template_9f49d4f7e3924b9fa36bcc249f5ea96a';
+  // Add future template IDs to this list.
+  const TEMPLATE_IDS = [
+    'template_9f49d4f7e3924b9fa36bcc249f5ea96a',
+    'template_95a16e28e5184839899cf3dfb6dbf286',
+    'template_db8cb7b6b670439088dfa3f780d020d4',
+    'template_eeefdf55f60440e583f20e91db821b8d'
+  ];
   const BASE = 'https://api.safetyculture.io';
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
@@ -136,7 +142,7 @@ function calculateFPYSummary_FINAL() {
     for (const inspection of inspections) {
       totalProcessed++;
 
-      if (inspection.template_id !== TEMPLATE_ID) continue;
+      if (!TEMPLATE_IDS.includes(inspection.template_id)) continue;
       matchedTemplate++;
 
       const inspectionId = inspection.inspection_id || inspection.audit_id || inspection.id;
