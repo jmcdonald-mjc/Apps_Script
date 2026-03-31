@@ -238,4 +238,101 @@ function calculateFPYSummary_FINAL() {
 
   // Format FPY column as percentage
   sheet.getRange(2, 6, output.length - 1, 1).setNumberFormat('0.00%');
+
+  // Write the dashboard matrix layout on the FPY Report tab.
+  writeFPYMatrixLayout();
+}
+
+function writeFPYMatrixLayout() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sourceSheet = ss.getSheetByName('Sheet1');
+  const targetSheet = ss.getSheetByName('FPY Report');
+
+  if (!sourceSheet) throw new Error('Sheet1 not found.');
+  if (!targetSheet) throw new Error('FPY Report not found.');
+
+  const sourceData = sourceSheet.getDataRange().getValues();
+  if (sourceData.length < 2) throw new Error('No source data found on Sheet1.');
+
+  const headers = sourceData[0];
+  const rows = sourceData.slice(1);
+
+  const colIndex = {
+    product: headers.indexOf('Product Line'),
+    year: headers.indexOf('Year'),
+    month: headers.indexOf('Month'),
+    total: headers.indexOf('Total'),
+    defects: headers.indexOf('Defects'),
+    fpy: headers.indexOf('FPY')
+  };
+
+  for (const [key, idx] of Object.entries(colIndex)) {
+    if (idx === -1) throw new Error('Missing column in Sheet1: ' + key);
+  }
+
+  const products = ['ARU', 'CSC', 'HGRH', 'MSC'];
+  const monthKeys = [];
+  const dataMap = {};
+
+  rows.forEach(function (r) {
+    const product = r[colIndex.product];
+    const year = r[colIndex.year];
+    const month = r[colIndex.month];
+
+    if (!products.includes(product)) return;
+    if (!year || month === '' || month == null) return;
+
+    const monthNum = Number(month);
+    const monthKey = year + '-' + String(monthNum).padStart(2, '0');
+
+    if (!monthKeys.includes(monthKey)) monthKeys.push(monthKey);
+
+    dataMap[product + '|' + monthKey] = {
+      total: Number(r[colIndex.total]) || 0,
+      defects: Number(r[colIndex.defects]) || 0,
+      fpy: Number(r[colIndex.fpy]) || 0
+    };
+  });
+
+  monthKeys.sort();
+
+  // Keep report headers; clear only the body area.
+  targetSheet.getRange('A4:M1000').clearContent();
+
+  const monthLabelValues = monthKeys.map(function (monthKey) {
+    const parts = monthKey.split('-');
+    const year = parts[0];
+    const month = parts[1];
+    return [month + '/' + year.slice(2)];
+  });
+
+  if (monthLabelValues.length) {
+    targetSheet.getRange(4, 1, monthLabelValues.length, 1).setValues(monthLabelValues);
+  }
+
+  const startCols = {
+    ARU: 2,
+    CSC: 5,
+    HGRH: 8,
+    MSC: 11
+  };
+
+  products.forEach(function (product) {
+    const out = monthKeys.map(function (monthKey) {
+      const record = dataMap[product + '|' + monthKey] || { total: 0, defects: 0, fpy: 0 };
+      return [record.total, record.defects, record.fpy];
+    });
+
+    if (out.length) {
+      targetSheet.getRange(4, startCols[product], out.length, 3).setValues(out);
+    }
+  });
+
+  // Only FPY columns are percentages.
+  if (monthKeys.length) {
+    targetSheet.getRange(4, 4, monthKeys.length, 1).setNumberFormat('0.00%');
+    targetSheet.getRange(4, 7, monthKeys.length, 1).setNumberFormat('0.00%');
+    targetSheet.getRange(4, 10, monthKeys.length, 1).setNumberFormat('0.00%');
+    targetSheet.getRange(4, 13, monthKeys.length, 1).setNumberFormat('0.00%');
+  }
 }
