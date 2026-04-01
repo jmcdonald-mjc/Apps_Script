@@ -5,8 +5,11 @@ function calculateFPYSummary_FINAL() {
   const TEMPLATE_MAP = {
     'template_9f49d4f7e3924b9fa36bcc249f5ea96a': 'ARU',
     'template_95a16e28e5184839899cf3dfb6dbf286': 'CSC',
+    'template_4d2ee8c207e64f94aa6c7627980a6eea': 'CSC', // Bard Coatings
     'template_db8cb7b6b670439088dfa3f780d020d4': 'MSC',
-    'template_eeefdf55f60440e583f20e91db821b8d': 'HGRH'
+    'template_9ac31eb9905248f68ca78a069ca23f79': 'MSC', // Coatings
+    'template_eeefdf55f60440e583f20e91db821b8d': 'HGRH',
+    'template_2cb7229367e84471a048e5d05a54180a': 'HGRH' // Gas Heat
   };
 
   const PRODUCTS = ['ARU', 'CSC', 'HGRH', 'MSC'];
