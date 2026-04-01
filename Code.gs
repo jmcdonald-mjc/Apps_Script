@@ -46,6 +46,7 @@ function calculateFPYSummary_FINAL() {
     const startCol = START_COLS[product];
     sheet.getRange(1, startCol, 2, 3).merge().setValue(product);
   });
+  sheet.getRange('W1:Y2').merge().setValue('All Lines');
 
   // Metric headers on row 4
   PRODUCTS.forEach(function (product) {
@@ -54,6 +55,9 @@ function calculateFPYSummary_FINAL() {
     sheet.getRange(4, c + 1).setValue('Defects');
     sheet.getRange(4, c + 2).setValue('FPY Inspection');
   });
+  sheet.getRange('W4').setValue('Total Inspected');
+  sheet.getRange('X4').setValue('Defects');
+  sheet.getRange('Y4').setValue('FPY Inspection');
 
   let url = BASE + '/feed/inspections?modified_after=2026-01-01T00:00:00Z&limit=100';
 
@@ -243,9 +247,29 @@ function calculateFPYSummary_FINAL() {
 
   monthKeys.sort();
 
+  const allLinesMonthly = {};
+
+  monthKeys.forEach(function (mk) {
+    let total = 0;
+    let defects = 0;
+
+    PRODUCTS.forEach(function (product) {
+      const record = monthlyData[product + '|' + mk];
+      if (record) {
+        total += record.total;
+        defects += record.defects;
+      }
+    });
+
+    allLinesMonthly[mk] = { total: total, defects: defects };
+  });
+
   // Overall plant average in A3 only
   const plantFPY = plantTotal > 0 ? (plantTotal - plantDefects) / plantTotal : 0;
   sheet.getRange('A3').setValue(plantFPY);
+  sheet.getRange('W5').setValue(plantTotal);
+  sheet.getRange('X5').setValue(plantDefects);
+  sheet.getRange('Y5').setValue(plantFPY);
 
   // Current Year Total row
   PRODUCTS.forEach(function (product) {
@@ -259,6 +283,16 @@ function calculateFPYSummary_FINAL() {
     sheet.getRange(5, col + 1).setValue(yearlyDefects);
     sheet.getRange(5, col + 2).setValue(yearlyFPY);
   });
+
+  const allLinesOut = monthKeys.map(function (mk) {
+    const record = allLinesMonthly[mk] || { total: 0, defects: 0 };
+    const fpy = record.total > 0 ? (record.total - record.defects) / record.total : 0;
+    return [record.total, record.defects, fpy];
+  });
+
+  if (allLinesOut.length) {
+    sheet.getRange(6, 23, allLinesOut.length, 3).setValues(allLinesOut); // W:Y
+  }
 
   // Monthly labels start row 6
   const monthLabelValues = monthKeys.map(function (mk) {
@@ -285,7 +319,7 @@ function calculateFPYSummary_FINAL() {
 
   const monthlyRowCount = monthKeys.length;
   const lastDataRow = Math.max(6, monthlyRowCount + 5);
-  const lastCol = 22; // V
+  const lastCol = 25; // Y
 
   // Formatting
   sheet.getRange('A3').setNumberFormat('0.00%');
@@ -303,6 +337,15 @@ function calculateFPYSummary_FINAL() {
       sheet.getRange(6, c + 2, monthlyRowCount, 1).setNumberFormat('0.00%');
     }
   });
+
+  sheet.getRange('W5').setNumberFormat('0');
+  sheet.getRange('X5').setNumberFormat('0');
+  sheet.getRange('Y5').setNumberFormat('0.00%');
+
+  if (monthlyRowCount > 0) {
+    sheet.getRange(6, 23, monthlyRowCount, 2).setNumberFormat('0');
+    sheet.getRange(6, 25, monthlyRowCount, 1).setNumberFormat('0.00%');
+  }
 
   // Borders and styling
   sheet.getRange(1, 1, lastDataRow, lastCol).setBorder(
@@ -333,6 +376,9 @@ function calculateFPYSummary_FINAL() {
     sheet.setColumnWidth(c + 1, 80);
     sheet.setColumnWidth(c + 2, 105);
   });
+  sheet.setColumnWidth(23, 95);
+  sheet.setColumnWidth(24, 80);
+  sheet.setColumnWidth(25, 105);
 
   sheet.setRowHeight(1, 28);
   sheet.setRowHeight(2, 28);
