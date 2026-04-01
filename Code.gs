@@ -5,52 +5,64 @@ function calculateFPYSummary_FINAL() {
   const TEMPLATE_MAP = {
     'template_9f49d4f7e3924b9fa36bcc249f5ea96a': 'ARU',
     'template_95a16e28e5184839899cf3dfb6dbf286': 'CSC',
-    'template_4d2ee8c207e64f94aa6c7627980a6eea': 'CSC', // Bard Coatings
     'template_db8cb7b6b670439088dfa3f780d020d4': 'MSC',
-    'template_9ac31eb9905248f68ca78a069ca23f79': 'MSC', // Coatings
     'template_eeefdf55f60440e583f20e91db821b8d': 'HGRH',
-    'template_2cb7229367e84471a048e5d05a54180a': 'HGRH' // Gas Heat
+    'template_2cb7229367e84471a048e5d05a54180a': 'Gas Heat',
+    'template_4d2ee8c207e64f94aa6c7627980a6eea': 'Bard Coatings',
+    'template_9ac31eb9905248f68ca78a069ca23f79': 'Coatings'
   };
 
-  const PRODUCTS = ['ARU', 'CSC', 'HGRH', 'MSC'];
+  const PRODUCTS = [
+    'ARU',
+    'CSC',
+    'HGRH',
+    'MSC',
+    'Gas Heat',
+    'Bard Coatings',
+    'Coatings'
+  ];
+
+  const START_COLS = {
+    ARU: 2,
+    CSC: 5,
+    HGRH: 8,
+    MSC: 11,
+    'Gas Heat': 14,
+    'Bard Coatings': 17,
+    Coatings: 20
+  };
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Sheet1');
   if (!sheet) throw new Error('Sheet1 not found.');
 
   sheet.clear();
 
-  // Layout to match sheet
+  // Layout
   sheet.getRange('A1').setValue('Month/Year');
-  sheet.getRange('A3').setValue('Plant Average');
-  sheet.getRange('A5').setValue('Current Year Total');
+  sheet.getRange('A2').setValue('Plant Average');
+  sheet.getRange('A4').setValue('Current Year Total');
 
-  sheet.getRange('B1:D2').merge().setValue('ARU');
-  sheet.getRange('E1:G2').merge().setValue('CSC');
-  sheet.getRange('H1:J2').merge().setValue('HGRH');
-  sheet.getRange('K1:M2').merge().setValue('MSC');
+  PRODUCTS.forEach(function (product) {
+    const startCol = START_COLS[product];
+    sheet.getRange(1, startCol, 2, 3).merge().setValue(product);
+  });
 
-  // Metric headers now on row 4
-  sheet.getRange('B4').setValue('Total Inspected');
-  sheet.getRange('C4').setValue('Defects');
-  sheet.getRange('D4').setValue('FPY Inspection');
-
-  sheet.getRange('E4').setValue('Total Inspected');
-  sheet.getRange('F4').setValue('Defects');
-  sheet.getRange('G4').setValue('FPY Inspection');
-
-  sheet.getRange('H4').setValue('Total Inspected');
-  sheet.getRange('I4').setValue('Defects');
-  sheet.getRange('J4').setValue('FPY Inspection');
-
-  sheet.getRange('K4').setValue('Total Inspected');
-  sheet.getRange('L4').setValue('Defects');
-  sheet.getRange('M4').setValue('FPY Inspection');
+  // Metric headers on row 4
+  PRODUCTS.forEach(function (product) {
+    const c = START_COLS[product];
+    sheet.getRange(4, c).setValue('Total Inspected');
+    sheet.getRange(4, c + 1).setValue('Defects');
+    sheet.getRange(4, c + 2).setValue('FPY Inspection');
+  });
 
   let url = BASE + '/feed/inspections?modified_after=2026-01-01T00:00:00Z&limit=100';
 
   const monthlyData = {};
   const yearlyTotals = {};
   const monthKeys = [];
+
+  let plantTotal = 0;
+  let plantDefects = 0;
 
   PRODUCTS.forEach(function (product) {
     yearlyTotals[product] = { total: 0, defects: 0 };
@@ -218,6 +230,9 @@ function calculateFPYSummary_FINAL() {
       yearlyTotals[productLine].total++;
       if (defectFound) yearlyTotals[productLine].defects++;
 
+      plantTotal++;
+      if (defectFound) plantDefects++;
+
       Utilities.sleep(100);
     }
 
@@ -228,25 +243,18 @@ function calculateFPYSummary_FINAL() {
 
   monthKeys.sort();
 
-  const startCols = {
-    ARU: 2,
-    CSC: 5,
-    HGRH: 8,
-    MSC: 11
-  };
+  // Overall plant average in A3 only
+  const plantFPY = plantTotal > 0 ? (plantTotal - plantDefects) / plantTotal : 0;
+  sheet.getRange('A3').setValue(plantFPY);
 
-  // Row 3 = Plant Average values
+  // Current Year Total row
   PRODUCTS.forEach(function (product) {
     const yearlyTotal = yearlyTotals[product].total;
     const yearlyDefects = yearlyTotals[product].defects;
     const yearlyFPY = yearlyTotal > 0 ? (yearlyTotal - yearlyDefects) / yearlyTotal : 0;
 
-    const col = startCols[product];
+    const col = START_COLS[product];
 
-    // Plant Average row
-    sheet.getRange(3, col).setValue(yearlyFPY);
-
-    // Current Year Total row
     sheet.getRange(5, col).setValue(yearlyTotal);
     sheet.getRange(5, col + 1).setValue(yearlyDefects);
     sheet.getRange(5, col + 2).setValue(yearlyFPY);
@@ -271,83 +279,60 @@ function calculateFPYSummary_FINAL() {
     });
 
     if (out.length) {
-      sheet.getRange(6, startCols[product], out.length, 3).setValues(out);
+      sheet.getRange(6, START_COLS[product], out.length, 3).setValues(out);
     }
   });
 
   const monthlyRowCount = monthKeys.length;
   const lastDataRow = Math.max(6, monthlyRowCount + 5);
+  const lastCol = 22; // V
 
   // Formatting
-  if (monthlyRowCount > 0) {
-    // Monthly counts
-    sheet.getRange(6, 2, monthlyRowCount, 2).setNumberFormat('0');
-    sheet.getRange(6, 5, monthlyRowCount, 2).setNumberFormat('0');
-    sheet.getRange(6, 8, monthlyRowCount, 2).setNumberFormat('0');
-    sheet.getRange(6, 11, monthlyRowCount, 2).setNumberFormat('0');
+  sheet.getRange('A3').setNumberFormat('0.00%');
 
-    // Monthly FPY
-    sheet.getRange(6, 4, monthlyRowCount, 1).setNumberFormat('0.00%');
-    sheet.getRange(6, 7, monthlyRowCount, 1).setNumberFormat('0.00%');
-    sheet.getRange(6, 10, monthlyRowCount, 1).setNumberFormat('0.00%');
-    sheet.getRange(6, 13, monthlyRowCount, 1).setNumberFormat('0.00%');
-  }
+  PRODUCTS.forEach(function (product) {
+    const c = START_COLS[product];
 
-  // Plant Average row
-  sheet.getRange('B3').setNumberFormat('0.00%');
-  sheet.getRange('E3').setNumberFormat('0.00%');
-  sheet.getRange('H3').setNumberFormat('0.00%');
-  sheet.getRange('K3').setNumberFormat('0.00%');
+    // Current year totals
+    sheet.getRange(5, c).setNumberFormat('0');
+    sheet.getRange(5, c + 1).setNumberFormat('0');
+    sheet.getRange(5, c + 2).setNumberFormat('0.00%');
 
-  // Current Year Total row
-  sheet.getRange('B5').setNumberFormat('0');
-  sheet.getRange('C5').setNumberFormat('0');
-  sheet.getRange('D5').setNumberFormat('0.00%');
-
-  sheet.getRange('E5').setNumberFormat('0');
-  sheet.getRange('F5').setNumberFormat('0');
-  sheet.getRange('G5').setNumberFormat('0.00%');
-
-  sheet.getRange('H5').setNumberFormat('0');
-  sheet.getRange('I5').setNumberFormat('0');
-  sheet.getRange('J5').setNumberFormat('0.00%');
-
-  sheet.getRange('K5').setNumberFormat('0');
-  sheet.getRange('L5').setNumberFormat('0');
-  sheet.getRange('M5').setNumberFormat('0.00%');
+    if (monthlyRowCount > 0) {
+      sheet.getRange(6, c, monthlyRowCount, 2).setNumberFormat('0');
+      sheet.getRange(6, c + 2, monthlyRowCount, 1).setNumberFormat('0.00%');
+    }
+  });
 
   // Borders and styling
-  sheet.getRange('A1:M' + lastDataRow).setBorder(
+  sheet.getRange(1, 1, lastDataRow, lastCol).setBorder(
     true, true, true, true, true, true,
     'black',
     SpreadsheetApp.BorderStyle.SOLID
   );
 
-  sheet.getRange('A1:M5').setFontWeight('bold').setHorizontalAlignment('center');
-  sheet.getRange('B1:D2').setHorizontalAlignment('center').setVerticalAlignment('middle');
-  sheet.getRange('E1:G2').setHorizontalAlignment('center').setVerticalAlignment('middle');
-  sheet.getRange('H1:J2').setHorizontalAlignment('center').setVerticalAlignment('middle');
-  sheet.getRange('K1:M2').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sheet.getRange(1, 1, 5, lastCol).setFontWeight('bold').setHorizontalAlignment('center');
+
+  PRODUCTS.forEach(function (product) {
+    const c = START_COLS[product];
+    sheet.getRange(1, c, 2, 3).setHorizontalAlignment('center').setVerticalAlignment('middle');
+  });
+
   sheet.getRange('A3:A' + lastDataRow).setHorizontalAlignment('left');
 
   // Auto resize + explicit widths
-  for (let col = 1; col <= 13; col++) {
+  for (let col = 1; col <= lastCol; col++) {
     sheet.autoResizeColumn(col);
   }
 
   sheet.setColumnWidth(1, 140);
-  sheet.setColumnWidth(2, 95);
-  sheet.setColumnWidth(3, 80);
-  sheet.setColumnWidth(4, 105);
-  sheet.setColumnWidth(5, 95);
-  sheet.setColumnWidth(6, 80);
-  sheet.setColumnWidth(7, 105);
-  sheet.setColumnWidth(8, 95);
-  sheet.setColumnWidth(9, 80);
-  sheet.setColumnWidth(10, 105);
-  sheet.setColumnWidth(11, 95);
-  sheet.setColumnWidth(12, 80);
-  sheet.setColumnWidth(13, 105);
+
+  PRODUCTS.forEach(function (product) {
+    const c = START_COLS[product];
+    sheet.setColumnWidth(c, 95);
+    sheet.setColumnWidth(c + 1, 80);
+    sheet.setColumnWidth(c + 2, 105);
+  });
 
   sheet.setRowHeight(1, 28);
   sheet.setRowHeight(2, 28);
