@@ -64,6 +64,7 @@ function calculateFPYSummary_FINAL() {
   const monthlyData = {};
   const yearlyTotals = {};
   const monthKeys = [];
+  const failureDetailRows = [];
 
   let plantTotal = 0;
   let plantDefects = 0;
@@ -140,6 +141,104 @@ function calculateFPYSummary_FINAL() {
     }
 
     return '';
+  }
+
+  function guessFailureCategory(text) {
+    const s = String(text || '').toLowerCase();
+
+    if (s.match(/wire|wiring|sensor|flow switch|transducer|vfd|relay|terminal|controller|a2l|electrical|voltage|harness/)) {
+      return 'Electrical / Controls';
+    }
+
+    if (s.match(/leak|refrigerant|txv|compressor|braze|coil|pressure|superheat|charge|circuit/)) {
+      return 'Refrigeration Circuit';
+    }
+
+    if (s.match(/missing|ship.?with|loose item|hardware|panel|sensor missing|parts missing/)) {
+      return 'Accessories / Ship-With';
+    }
+
+    if (s.match(/manual|diagram|drawing|label|nameplate|documentation|iom|instructions/)) {
+      return 'Documentation';
+    }
+
+    if (s.match(/door|panel|cabinet|filter|fan|wheel|structural|damage|bracket/)) {
+      return 'Airflow / Mechanical / Structural';
+    }
+
+    return 'Uncategorized';
+  }
+
+  function looksFailedOrNegative(item, answer) {
+    const answerLower = String(answer || '').trim().toLowerCase();
+    const negativeAnswers = [
+      'fail', 'failed', 'false', 'no', 'not ok', 'ng', 'nok', 'bad'
+    ];
+
+    if (negativeAnswers.includes(answerLower)) return true;
+
+    const score = item && item.score;
+    if (score && (String(score.result || '').toLowerCase() === 'fail' || score.failed === true)) {
+      return true;
+    }
+
+    if (item && (item.flagged === true || item.is_flagged === true)) return true;
+    if (item && (item.failed === true || item.result === 'fail')) return true;
+
+    return false;
+  }
+
+  function extractFailureDetails(items, context, rows, sectionName) {
+    if (!items || !Array.isArray(items)) return;
+
+    for (const item of items) {
+      if (!item) continue;
+
+      const label = String(item.label || item.title || item.data_label || '').trim();
+      const lower = label.toLowerCase();
+      const answer = extractAnswerFromResponses(item.responses);
+      const currentSection = String(
+        item.group_label || item.section_label || sectionName || ''
+      ).trim();
+
+      const looksLikeFailureField =
+        lower.includes('defect') ||
+        lower.includes('issue') ||
+        lower.includes('fail') ||
+        lower.includes('nonconformance') ||
+        lower.includes('corrective') ||
+        lower.includes('comment') ||
+        lower.includes('note');
+
+      const answerLower = String(answer || '').trim().toLowerCase();
+      const answerLooksUseful =
+        answer &&
+        !['no', 'n/a', 'na', 'none', 'ok', 'pass'].includes(answerLower);
+
+      const failedOrFlagged = looksFailedOrNegative(item, answer);
+
+      if ((looksLikeFailureField && answerLooksUseful) || failedOrFlagged) {
+        rows.push([
+          context.inspectionId,
+          context.productLine,
+          context.templateId,
+          context.templateName,
+          context.dateStr,
+          context.monthKey,
+          context.jobNumber || '',
+          context.serialNumber || '',
+          context.defectAnswer || '',
+          label || '(unlabeled item)',
+          answer || '',
+          currentSection,
+          guessFailureCategory(label + ' ' + answer + ' ' + currentSection)
+        ]);
+      }
+
+      if (item.items) {
+        extractFailureDetails(item.items, context, rows, currentSection || label);
+      }
+    }
   }
 
   function fetchInspectionDetail(id) {
@@ -221,6 +320,29 @@ function calculateFPYSummary_FINAL() {
         findDefectAnswer(detail.audit_data && detail.audit_data.items);
 
       const defectFound = String(defectAnswer).trim().toLowerCase() === 'yes';
+      const dateCompletedStr = inspection.date_completed || dateStr;
+      const context = {
+        inspectionId: inspectionId,
+        productLine: productLine,
+        templateId: inspection.template_id || '',
+        templateName: inspection.template_name || detail.template_name || '',
+        dateStr: dateCompletedStr,
+        monthKey: monthKey,
+        jobNumber: inspection.reference || detail.reference || '',
+        serialNumber: inspection.asset_id || '',
+        defectAnswer: defectAnswer
+      };
+
+      if (defectFound) {
+        extractFailureDetails(detail.header_items, context, failureDetailRows, '');
+        extractFailureDetails(detail.items, context, failureDetailRows, '');
+        extractFailureDetails(
+          detail.audit_data && detail.audit_data.items,
+          context,
+          failureDetailRows,
+          ''
+        );
+      }
 
       const key = productLine + '|' + monthKey;
 
@@ -385,4 +507,29 @@ function calculateFPYSummary_FINAL() {
   sheet.setRowHeight(3, 28);
   sheet.setRowHeight(4, 28);
   sheet.setRowHeight(5, 28);
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const detailSheet =
+    ss.getSheetByName('FPY_Failure_Details') || ss.insertSheet('FPY_Failure_Details');
+
+  detailSheet.clear();
+  detailSheet.getRange(1, 1, 1, 13).setValues([[
+    'Inspection ID',
+    'Product Line',
+    'Template ID',
+    'Template Name',
+    'Date Completed',
+    'Month',
+    'Job Number',
+    'Serial Number',
+    'Defects Found',
+    'Defect Question',
+    'Defect Detail',
+    'Section',
+    'Category Guess'
+  ]]);
+
+  if (failureDetailRows.length) {
+    detailSheet.getRange(2, 1, failureDetailRows.length, 13).setValues(failureDetailRows);
+  }
 }
