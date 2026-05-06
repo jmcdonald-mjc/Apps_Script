@@ -1,5 +1,5 @@
 function calculateFPYSummary_FINAL() {
-  const token = 'SC_API_TOKEN';
+  const token = PropertiesService.getScriptProperties().getProperty('SC_API_TOKEN');
   const BASE = 'https://api.safetyculture.io';
 
   const TEMPLATE_MAP = {
@@ -532,4 +532,77 @@ function calculateFPYSummary_FINAL() {
   if (failureDetailRows.length) {
     detailSheet.getRange(2, 1, failureDetailRows.length, 13).setValues(failureDetailRows);
   }
+
+  buildProductLineParetoTab(ss, failureDetailRows);
+}
+
+function buildProductLineParetoTab(ss, detailRows) {
+  const sheet =
+    ss.getSheetByName('FPY_Product_Line_Pareto') ||
+    ss.insertSheet('FPY_Product_Line_Pareto');
+
+  sheet.clear();
+  sheet.clearCharts();
+
+  const headers = [
+    'Product Line',
+    'Issue Category',
+    'Count',
+    'Cumulative',
+    'Cumulative %'
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  if (!detailRows.length) return;
+
+  const grouped = {};
+
+  detailRows.forEach(row => {
+    const product = row[1] || 'Unknown';
+    const category = row[12] || 'Uncategorized';
+    const key = product + '|' + category;
+
+    if (!grouped[key]) {
+      grouped[key] = { product, category, count: 0 };
+    }
+
+    grouped[key].count++;
+  });
+
+  const sorted = Object.values(grouped).sort((a, b) => b.count - a.count);
+
+  let cumulative = 0;
+  const total = sorted.reduce((s, r) => s + r.count, 0);
+
+  const output = sorted.map(r => {
+    cumulative += r.count;
+    return [
+      r.product,
+      r.category,
+      r.count,
+      cumulative,
+      total ? cumulative / total : 0
+    ];
+  });
+
+  sheet.getRange(2, 1, output.length, headers.length).setValues(output);
+  sheet.getRange(2, 5, output.length).setNumberFormat('0.00%');
+
+  const chart = sheet.newChart()
+    .asComboChart()
+    .addRange(sheet.getRange(1, 2, output.length + 1, 4))
+    .setPosition(1, 7, 0, 0)
+    .setOption('title', 'Pareto - Top Issues by Product Line')
+    .setOption('seriesType', 'bars')
+    .setOption('series', {
+      2: { type: 'line', targetAxisIndex: 1 }
+    })
+    .setOption('vAxes', {
+      0: { title: 'Count' },
+      1: { title: 'Cumulative %', format: 'percent' }
+    })
+    .build();
+
+  sheet.insertChart(chart);
 }
