@@ -162,7 +162,7 @@ function calculateFPYSummary_FINAL() {
       return 'Refrigeration Circuit';
     }
 
-    if (s.match(/missing|ship.?with|loose item|hardware|panel|sensor missing|parts missing/)) {
+    if (s.match(/fastener|screw|bolt|nut|washer|rivet|hardware|missing|ship.?with|loose item|panel|sensor missing|parts missing/)) {
       return 'Accessories / Ship-With';
     }
 
@@ -208,6 +208,21 @@ function calculateFPYSummary_FINAL() {
       const currentSection = String(
         item.group_label || item.section_label || sectionName || ''
       ).trim();
+
+      const informationalQuestion =
+        lower.startsWith('is this ') ||
+        lower.startsWith('is the ') ||
+        lower.startsWith('does this ') ||
+        lower.startsWith('does the ') ||
+        lower.startsWith('are there ') ||
+        lower.startsWith('were there ');
+
+      if (informationalQuestion && !lower.includes('defect') && !lower.includes('issue')) {
+        if (item.items) {
+          extractFailureDetails(item.items, context, rows, currentSection || label);
+        }
+        continue;
+      }
 
       if (isDefectGateQuestion(label)) {
         if (item.items) {
