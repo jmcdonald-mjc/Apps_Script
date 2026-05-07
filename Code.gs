@@ -745,6 +745,9 @@ function buildProductLineParetoTab(ss, detailRows) {
   detailRows.forEach(row => {
     const product = row[1] || 'Unknown';
     const category = row[12] || 'Uncategorized';
+
+    if (category === 'Uncategorized') return;
+
     const key = product + '|' + category;
 
     if (!grouped[key]) {
@@ -775,7 +778,7 @@ function buildProductLineParetoTab(ss, detailRows) {
 
   const chart = sheet.newChart()
     .asComboChart()
-    .addRange(sheet.getRange(1, 2, output.length + 1, 4))
+    .addRange(sheet.getRange(2, 2, output.length, 4))
     .setPosition(1, 7, 0, 0)
     .setOption('title', 'Pareto - Top Issues by Product Line')
     .setOption('seriesType', 'bars')
