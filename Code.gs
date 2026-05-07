@@ -118,18 +118,26 @@ function calculateFPYSummary_FINAL() {
     return '';
   }
 
+  function isDefectGateQuestion(label) {
+    const lower = String(label || '').trim().toLowerCase();
+
+    return (
+      lower === 'were there any defects found?' ||
+      lower === 'are there any defects found?' ||
+      lower.includes('were there any defects found') ||
+      lower.includes('are there any defects found')
+    );
+  }
+
   function findDefectAnswer(items) {
     if (!items || !Array.isArray(items)) return '';
 
     for (const item of items) {
       if (!item) continue;
 
-      const label = String(item.label || '').trim().toLowerCase();
+      const label = String(item.label || item.title || item.data_label || '').trim();
 
-      if (
-        label === 'were there any defects found?' ||
-        label.includes('were there any defects found')
-      ) {
+      if (isDefectGateQuestion(label)) {
         const answer = extractAnswerFromResponses(item.responses);
         if (answer) return answer;
       }
@@ -200,6 +208,13 @@ function calculateFPYSummary_FINAL() {
       const currentSection = String(
         item.group_label || item.section_label || sectionName || ''
       ).trim();
+
+      if (isDefectGateQuestion(label)) {
+        if (item.items) {
+          extractFailureDetails(item.items, context, rows, currentSection || label);
+        }
+        continue;
+      }
 
       const looksLikeFailureField =
         lower.includes('defect') ||
