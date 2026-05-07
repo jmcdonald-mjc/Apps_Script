@@ -278,20 +278,29 @@ function calculateFPYSummary_FINAL() {
     ];
 
     for (const endpoint of candidates) {
-      const res = UrlFetchApp.fetch(endpoint, {
-        method: 'get',
-        headers: {
-          Authorization: 'Bearer ' + token,
-          Accept: 'application/json'
-        },
-        muteHttpExceptions: true
-      });
+      try {
+        const res = UrlFetchApp.fetch(endpoint, {
+          method: 'get',
+          headers: {
+            Authorization: 'Bearer ' + token,
+            Accept: 'application/json'
+          },
+          muteHttpExceptions: true
+        });
 
-      if (res.getResponseCode() === 200) {
-        return JSON.parse(res.getContentText());
+        const code = res.getResponseCode();
+
+        if (code === 200) {
+          return JSON.parse(res.getContentText());
+        }
+
+        Logger.log('Inspection detail endpoint returned ' + code + ': ' + endpoint);
+      } catch (err) {
+        Logger.log('Inspection detail endpoint failed: ' + endpoint + ' | ' + err);
       }
     }
 
+    Logger.log('No inspection detail found for inspection ID: ' + id);
     return null;
   }
 
