@@ -542,7 +542,9 @@ function buildProductLineParetoTab(ss, detailRows) {
     ss.insertSheet('FPY_Product_Line_Pareto');
 
   sheet.clear();
-  sheet.clearCharts();
+  sheet.getCharts().forEach(function(chart) {
+    sheet.removeChart(chart);
+  });
 
   const headers = [
     'Product Line',
