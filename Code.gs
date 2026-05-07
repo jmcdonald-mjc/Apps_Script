@@ -534,6 +534,149 @@ function calculateFPYSummary_FINAL() {
   }
 
   buildProductLineParetoTab(ss, failureDetailRows);
+  buildPreviousMonthTopIssuesTab(ss, failureDetailRows, PRODUCTS);
+}
+
+function buildPreviousMonthTopIssuesTab(ss, detailRows, products) {
+  const sheetName = 'FPY_Previous_Month_Top_Issues';
+  const sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
+
+  sheet.clear();
+  sheet.getCharts().forEach(function(chart) {
+    sheet.removeChart(chart);
+  });
+
+  const now = new Date();
+  const previousMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const previousMonthKey =
+    previousMonthDate.getFullYear() +
+    '-' +
+    String(previousMonthDate.getMonth() + 1).padStart(2, '0');
+  const previousMonthLabel = Utilities.formatDate(
+    previousMonthDate,
+    Session.getScriptTimeZone(),
+    'MMMM yyyy'
+  );
+
+  sheet.getRange('A1:F1').merge().setValue('Top 3 Issues by Product Line - ' + previousMonthLabel);
+
+  const headers = [
+    'Product Line',
+    'Rank',
+    'Issue Category',
+    'Count',
+    'Issue Description',
+    'Example Inspections'
+  ];
+
+  sheet.getRange(3, 1, 1, headers.length).setValues([headers]);
+
+  const grouped = {};
+
+  detailRows.forEach(function(row) {
+    const productLine = row[1] || 'Unknown';
+    const monthKey = row[5] || '';
+
+    if (monthKey !== previousMonthKey) return;
+
+    const category = row[12] || 'Uncategorized';
+    const defectQuestion = String(row[9] || '').trim();
+    const defectDetail = String(row[10] || '').trim();
+    const issueDetail = defectQuestion && defectDetail
+      ? defectQuestion + ': ' + defectDetail
+      : defectDetail || defectQuestion;
+    const inspectionId = row[0] || '';
+    const key = productLine + '|' + category;
+
+    if (!grouped[key]) {
+      grouped[key] = {
+        productLine: productLine,
+        category: category,
+        count: 0,
+        descriptions: [],
+        inspections: []
+      };
+    }
+
+    grouped[key].count++;
+
+    if (issueDetail && grouped[key].descriptions.indexOf(issueDetail) === -1) {
+      grouped[key].descriptions.push(issueDetail);
+    }
+
+    if (inspectionId && grouped[key].inspections.indexOf(inspectionId) === -1) {
+      grouped[key].inspections.push(inspectionId);
+    }
+  });
+
+  const rows = [];
+  const productList = products && products.length ? products.slice() : [];
+
+  Object.values(grouped).forEach(function(record) {
+    if (productList.indexOf(record.productLine) === -1) {
+      productList.push(record.productLine);
+    }
+  });
+
+  productList.forEach(function(productLine) {
+    const topIssues = Object.values(grouped)
+      .filter(function(record) {
+        return record.productLine === productLine;
+      })
+      .sort(function(a, b) {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.category.localeCompare(b.category);
+      })
+      .slice(0, 3);
+
+    topIssues.forEach(function(record, index) {
+      rows.push([
+        record.productLine,
+        index + 1,
+        record.category,
+        record.count,
+        record.descriptions.length
+          ? record.descriptions.slice(0, 3).join(' | ')
+          : record.category,
+        record.inspections.slice(0, 5).join(', ')
+      ]);
+    });
+  });
+
+  if (rows.length) {
+    sheet.getRange(4, 1, rows.length, headers.length).setValues(rows);
+  } else {
+    sheet.getRange('A4').setValue('No issue details found for ' + previousMonthLabel + '.');
+  }
+
+  const lastRow = Math.max(rows.length + 3, 4);
+  sheet.getRange(1, 1, lastRow, headers.length).setBorder(
+    true, true, true, true, true, true,
+    'black',
+    SpreadsheetApp.BorderStyle.SOLID
+  );
+
+  sheet.getRange('A1:F1')
+    .setFontWeight('bold')
+    .setFontSize(14)
+    .setHorizontalAlignment('center');
+  sheet.getRange(3, 1, 1, headers.length)
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center');
+
+  if (rows.length) {
+    sheet.getRange(4, 4, rows.length, 1).setNumberFormat('0');
+    sheet.getRange(4, 5, rows.length, 2).setWrap(true);
+  }
+
+  for (let col = 1; col <= headers.length; col++) {
+    sheet.autoResizeColumn(col);
+  }
+
+  sheet.setColumnWidth(1, 140);
+  sheet.setColumnWidth(3, 190);
+  sheet.setColumnWidth(5, 420);
+  sheet.setColumnWidth(6, 220);
 }
 
 function buildProductLineParetoTab(ss, detailRows) {
