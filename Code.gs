@@ -66,6 +66,9 @@ function calculateFPYSummary_FINAL() {
   const monthKeys = [];
   const failureDetailRows = [];
 
+  // NEW: ARU-only raw final inspection output rows.
+  const aruRawInspectionRows = [];
+
   let plantTotal = 0;
   let plantDefects = 0;
 
@@ -271,6 +274,41 @@ function calculateFPYSummary_FINAL() {
     }
   }
 
+  // NEW: captures raw ARU checklist items only.
+  function extractARURawInspectionItems(items, context, rows, sectionName) {
+    if (!items || !Array.isArray(items)) return;
+
+    for (const item of items) {
+      if (!item) continue;
+
+      const label = String(item.label || item.title || item.data_label || '').trim();
+      const answer = extractAnswerFromResponses(item.responses);
+      const currentSection = String(
+        item.group_label || item.section_label || sectionName || ''
+      ).trim();
+
+      rows.push([
+        context.inspectionId,
+        context.productLine,
+        context.templateId,
+        context.templateName,
+        context.dateStr,
+        context.monthKey,
+        context.jobNumber || '',
+        context.serialNumber || '',
+        context.defectAnswer || '',
+        currentSection,
+        label || '(unlabeled item)',
+        answer || '',
+        guessFailureCategory(label + ' ' + answer + ' ' + currentSection)
+      ]);
+
+      if (item.items) {
+        extractARURawInspectionItems(item.items, context, rows, currentSection || label);
+      }
+    }
+  }
+
   function fetchInspectionDetail(id) {
     const candidates = [
       BASE + '/audits/' + encodeURIComponent(id),
@@ -371,6 +409,18 @@ function calculateFPYSummary_FINAL() {
         serialNumber: inspection.asset_id || '',
         defectAnswer: defectAnswer
       };
+
+      // NEW: ARU-only raw final inspection extraction.
+      if (productLine === 'ARU') {
+        extractARURawInspectionItems(detail.header_items, context, aruRawInspectionRows, '');
+        extractARURawInspectionItems(detail.items, context, aruRawInspectionRows, '');
+        extractARURawInspectionItems(
+          detail.audit_data && detail.audit_data.items,
+          context,
+          aruRawInspectionRows,
+          ''
+        );
+      }
 
       if (defectFound) {
         extractFailureDetails(detail.header_items, context, failureDetailRows, '');
@@ -572,8 +622,72 @@ function calculateFPYSummary_FINAL() {
     detailSheet.getRange(2, 1, failureDetailRows.length, 13).setValues(failureDetailRows);
   }
 
+  // NEW: write ARU-only raw inspection tab.
+  writeARURawFinalInspectionTab(ss, aruRawInspectionRows);
+
   buildProductLineParetoTab(ss, failureDetailRows);
   buildPreviousMonthTopIssuesTab(ss, failureDetailRows, PRODUCTS);
+}
+
+function writeARURawFinalInspectionTab(ss, rows) {
+  const sheetName = 'ARU_Raw_Final_Inspections';
+  const sheet = ss.getSheetByName(sheetName) || ss.insertSheet(sheetName);
+
+  sheet.clear();
+
+  const headers = [
+    'Inspection ID',
+    'Product Line',
+    'Template ID',
+    'Template Name',
+    'Date Completed',
+    'Month',
+    'Job Number',
+    'Serial Number',
+    'Defects Found',
+    'Section',
+    'Checklist Item',
+    'Response / Result',
+    'Category Guess'
+  ];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, headers.length).setValues(rows);
+  }
+
+  const lastRow = Math.max(rows.length + 1, 2);
+  const lastCol = headers.length;
+
+  sheet.setFrozenRows(1);
+
+  sheet.getRange(1, 1, lastRow, lastCol).setBorder(
+    true, true, true, true, true, true,
+    'black',
+    SpreadsheetApp.BorderStyle.SOLID
+  );
+
+  sheet.getRange(1, 1, 1, lastCol)
+    .setFontWeight('bold')
+    .setHorizontalAlignment('center');
+
+  if (rows.length) {
+    sheet.getRange(2, 10, rows.length, 3).setWrap(true);
+  }
+
+  for (let col = 1; col <= lastCol; col++) {
+    sheet.autoResizeColumn(col);
+  }
+
+  sheet.setColumnWidth(1, 210);
+  sheet.setColumnWidth(4, 220);
+  sheet.setColumnWidth(7, 140);
+  sheet.setColumnWidth(8, 140);
+  sheet.setColumnWidth(10, 220);
+  sheet.setColumnWidth(11, 420);
+  sheet.setColumnWidth(12, 260);
+  sheet.setColumnWidth(13, 180);
 }
 
 function buildPreviousMonthTopIssuesTab(ss, detailRows, products) {
