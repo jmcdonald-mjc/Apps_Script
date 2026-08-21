@@ -20,16 +20,18 @@ const VALIDATED_ISSUE_PRODUCT_LINES_ = Object.freeze([
   'CSC',
   'Mods',
   'Gas Heat',
-  'Coatings'
+  'Coatings',
+  'Bard Coatings'
 ]);
 
 const VALIDATED_ISSUE_BREAKDOWN_BLOCKS_ = Object.freeze([
-  { product: 'MSC', startColumn: 9 },       // I:L
-  { product: 'ARU', startColumn: 14 },      // N:Q
-  { product: 'CSC', startColumn: 19 },      // S:V
-  { product: 'Mods', startColumn: 24 },     // X:AA
-  { product: 'Gas Heat', startColumn: 29 }, // AC:AF
-  { product: 'Coatings', startColumn: 34 }  // AH:AK
+  { product: 'MSC', startColumn: 9 },             // I:L
+  { product: 'ARU', startColumn: 14 },            // N:Q
+  { product: 'CSC', startColumn: 19 },            // S:V
+  { product: 'Mods', startColumn: 24 },           // X:AA
+  { product: 'Gas Heat', startColumn: 29 },       // AC:AF
+  { product: 'Coatings', startColumn: 34 },       // AH:AK
+  { product: 'Bard Coatings', startColumn: 39 }   // AM:AP
 ]);
 
 /**
@@ -57,6 +59,16 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
   if (!chartDataSheet) {
     chartDataSheet = spreadsheet.insertSheet(VALIDATED_ISSUE_CHART_DATA_SHEET_);
     chartDataSheet.hideSheet();
+  }
+
+  const requiredColumns = VALIDATED_ISSUE_BREAKDOWN_BLOCKS_[
+    VALIDATED_ISSUE_BREAKDOWN_BLOCKS_.length - 1
+  ].startColumn + 3;
+  if (chartDataSheet.getMaxColumns() < requiredColumns) {
+    chartDataSheet.insertColumnsAfter(
+      chartDataSheet.getMaxColumns(),
+      requiredColumns - chartDataSheet.getMaxColumns()
+    );
   }
 
   const data = monthlySheet.getDataRange().getValues();
@@ -105,16 +117,16 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
     if (!month || !product) return;
 
     const key = validatedIssueMonthKey_(month) + '|' + product;
-    const startup = validatedIssueNumberOrBlank_(
+    const startup = validatedIssueNumberOrZero_(
       row[columns['Startup Issues']]
     );
-    const warranty = validatedIssueNumberOrBlank_(
+    const warranty = validatedIssueNumberOrZero_(
       row[columns['Warranty Issues']]
     );
-    const service = validatedIssueNumberOrBlank_(
+    const service = validatedIssueNumberOrZero_(
       row[columns['Service Issues']]
     );
-    const total = validatedIssueNumberOrBlank_(
+    const total = validatedIssueNumberOrZero_(
       row[columns['Total Issues']]
     );
 
@@ -126,7 +138,7 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
     };
   });
 
-  // A:G = monthly validated issue totals by product.
+  // A:H = monthly validated issue totals by product.
   // This drives the all-products service-ticket chart.
   const productSummary = [
     ['Month'].concat(VALIDATED_ISSUE_PRODUCT_LINES_)
@@ -137,13 +149,14 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
     const row = [month];
     VALIDATED_ISSUE_PRODUCT_LINES_.forEach(function(product) {
       const record = byMonthAndProduct[monthKey + '|' + product];
-      row.push(record ? record.total : '');
+      row.push(record ? record.total : 0);
     });
     productSummary.push(row);
   });
 
-  chartDataSheet.getRange(1, 1, 13, 7).clearContent();
-  chartDataSheet.getRange(1, 1, productSummary.length, 7)
+  const productSummaryWidth = productSummary[0].length;
+  chartDataSheet.getRange(1, 1, 13, productSummaryWidth).clearContent();
+  chartDataSheet.getRange(1, 1, productSummary.length, productSummaryWidth)
     .setValues(productSummary);
   chartDataSheet.getRange(2, 1, 12, 1).setNumberFormat('mmm yyyy');
 
@@ -157,9 +170,9 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
       ];
       rows.push([
         month,
-        record ? record.startup : '',
-        record ? record.warranty : '',
-        record ? record.service : ''
+        record ? record.startup : 0,
+        record ? record.warranty : 0,
+        record ? record.service : 0
       ]);
     });
 
@@ -205,8 +218,8 @@ function validatedIssueMonthKey_(date) {
   return Utilities.formatDate(date, 'UTC', 'yyyy-MM');
 }
 
-function validatedIssueNumberOrBlank_(value) {
-  if (value === '' || value === null || value === undefined) return '';
+function validatedIssueNumberOrZero_(value) {
+  if (value === '' || value === null || value === undefined) return 0;
   const number = Number(value);
-  return isNaN(number) ? '' : number;
+  return isNaN(number) ? 0 : number;
 }
