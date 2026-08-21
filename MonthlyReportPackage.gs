@@ -340,8 +340,8 @@ function buildMonthlyQualityPackageDPPMFormulaRow_(rowNumber, productLine) {
     const firstProductRow = rowNumber - 3;
     const lastProductRow = rowNumber - 1;
     inputFormulas = ['C', 'D', 'E', 'F'].map(function(column) {
-      return '=IF(COUNT(' + column + firstProductRow + ':' + column + lastProductRow +
-        ')=0,"",SUM(' + column + firstProductRow + ':' + column + lastProductRow + '))';
+      return '=IF(COUNT(C' + firstProductRow + ':C' + lastProductRow +
+        ')<3,"",SUM(' + column + firstProductRow + ':' + column + lastProductRow + '))';
     });
   } else {
     inputFormulas = ['C', 'D', 'E', 'F'].map(function(column) {
