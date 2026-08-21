@@ -14,6 +14,13 @@
  * name used by updateMonthlyQualityReport().
  */
 
+const MONTHLY_QUALITY_VISIBLE_DPPM_CHART_LAYOUT_ = Object.freeze({
+  left: 75.384,
+  top: 36,
+  width: 564.33,
+  height: 211.05
+});
+
 const MONTHLY_QUALITY_VISIBLE_DPPM_SECTIONS_ = Object.freeze([
   {
     slideLabel: 'All Lines',
@@ -58,7 +65,7 @@ function updateMonthlyQualityPackageDPPM_(packageResult) {
   MONTHLY_QUALITY_VISIBLE_DPPM_SECTIONS_.forEach(function(section) {
     const chart = findMonthlyQualityVisibleDPPMChart_(spreadsheet, section);
     const slide = findMonthlyQualitySlide_(presentation, section.slideLabel);
-    replaceMonthlyQualityPackageChart_(slide, chart);
+    replaceMonthlyQualityVisibleDPPMChart_(slide, chart);
     updatedSections.push(section.slideLabel);
   });
 
@@ -91,6 +98,54 @@ function findMonthlyQualityVisibleDPPMChart_(spreadsheet, section) {
 
   throw new Error(
     'Visible DPPM chart not found: ' + section.sheetName + ' / ' + section.chartTitle
+  );
+}
+
+function replaceMonthlyQualityVisibleDPPMChart_(slide, chart) {
+  const elements = slide.getPageElements();
+  let dppmPlaceholder = null;
+  let largestPlaceholder = null;
+  let largestArea = 0;
+
+  elements.forEach(function(element) {
+    const type = element.getPageElementType();
+    if (
+      type !== SlidesApp.PageElementType.IMAGE &&
+      type !== SlidesApp.PageElementType.SHEETS_CHART
+    ) {
+      return;
+    }
+
+    let title = '';
+    try {
+      title = String(element.getTitle ? element.getTitle() : '').trim();
+    } catch (error) {
+      title = '';
+    }
+
+    if (title.indexOf('12-Mth Rolling DPPM') !== -1) {
+      dppmPlaceholder = element;
+    }
+
+    const area = element.getWidth() * element.getHeight();
+    if (area > largestArea) {
+      largestArea = area;
+      largestPlaceholder = element;
+    }
+  });
+
+  const placeholder = dppmPlaceholder || largestPlaceholder;
+  if (!placeholder) {
+    throw new Error('No DPPM chart image or linked chart was found on the slide.');
+  }
+
+  placeholder.remove();
+  slide.insertSheetsChart(
+    chart,
+    MONTHLY_QUALITY_VISIBLE_DPPM_CHART_LAYOUT_.left,
+    MONTHLY_QUALITY_VISIBLE_DPPM_CHART_LAYOUT_.top,
+    MONTHLY_QUALITY_VISIBLE_DPPM_CHART_LAYOUT_.width,
+    MONTHLY_QUALITY_VISIBLE_DPPM_CHART_LAYOUT_.height
   );
 }
 
