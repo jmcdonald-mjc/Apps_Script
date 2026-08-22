@@ -5,9 +5,11 @@
  * charts. Those are the legacy line-only charts. The monthly deck should use
  * the visible workbook charts on Plant Summary / MSC DPPM / CSC DPPM / ARU DPPM.
  *
- * This override also refreshes the service-ticket chart source from the
- * validated DPPM issue model before any linked Sheets charts are refreshed.
- * Raw HubSpot ticket counts must never overwrite these reviewed issue counts.
+ * This override also performs a complete HubSpot ticket sync before rebuilding
+ * the service-ticket chart source. Countable issues come directly from the
+ * Support Pipeline using Startup/Warranty/Service and excluding tickets where
+ * MJC No Fault is set. The same counts feed DPPM Inputs and the Slides summary
+ * tables so HubSpot, Sheets, and Slides all use the same method.
  *
  * This file is intentionally named ZZZ_* so clasp/Apps Script loads it after
  * MonthlyReportPackage.gs and this implementation wins for the shared function
@@ -52,12 +54,23 @@ const MONTHLY_QUALITY_VISIBLE_DPPM_SECTIONS_ = Object.freeze([
 ]);
 
 /**
- * Replaces the DPPM chart placeholders with the current visible workbook charts.
- * Before touching Slides, rebuild the service-ticket chart data from DPPM
- * Monthly so the deck always uses the reviewed quality issue counts rather
- * than the raw number of HubSpot tickets.
+ * Refresh HubSpot, rebuild issue/DPPM source data, replace the DPPM chart
+ * placeholders, update the current/previous issue tables, and refresh every
+ * linked Sheets chart in the deck.
  */
 function updateMonthlyQualityPackageDPPM_(packageResult) {
+  const hubSpotSyncResult = syncHubSpotSupportTicketsToSpreadsheet_(
+    packageResult.dataFile.getId()
+  );
+  Logger.log(JSON.stringify(hubSpotSyncResult));
+
+  if (hubSpotSyncResult.status !== 'READY') {
+    throw new Error(
+      'HubSpot sync is required for monthly quality issue reporting: ' +
+      String(hubSpotSyncResult.reason || hubSpotSyncResult.status)
+    );
+  }
+
   const spreadsheet = SpreadsheetApp.openById(packageResult.dataFile.getId());
 
   const validatedIssueChartResult =
@@ -77,9 +90,13 @@ function updateMonthlyQualityPackageDPPM_(packageResult) {
   });
 
   normalizeMonthlyQualityServiceChartSlides_(spreadsheet, presentation);
+  updateMonthlyQualityIssueSummaryTables_(
+    presentation,
+    validatedIssueChartResult
+  );
 
   // Refresh every linked Sheets chart in the deck. This includes the recreated
-  // service-ticket charts, so changes made to HubSpot Chart Data are rendered
+  // service-ticket charts, so the freshly synchronized HubSpot data is rendered
   // into Slides during the same monthly-report run.
   const linkedChartsRefreshed = refreshMonthlyQualityLinkedSheetsCharts_(
     presentation
@@ -88,6 +105,7 @@ function updateMonthlyQualityPackageDPPM_(packageResult) {
   presentation.saveAndClose();
   return {
     updatedSections: updatedSections,
+    hubSpotSync: hubSpotSyncResult,
     validatedIssueChartData: validatedIssueChartResult,
     linkedChartsRefreshed: linkedChartsRefreshed
   };
@@ -176,7 +194,7 @@ function ensureMonthlyQualityBardCoatingsServiceChart_(spreadsheet) {
 
   const dataSheet = spreadsheet.getSheetByName(VALIDATED_ISSUE_CHART_DATA_SHEET_);
   if (!dataSheet) {
-    throw new Error('Missing validated issue chart data sheet.');
+    throw new Error('Missing HubSpot issue chart data sheet.');
   }
 
   let sheet = spreadsheet.getSheetByName('Bard Coatings');
@@ -261,6 +279,83 @@ function replaceMonthlyQualityServiceChartArea_(slide, chart) {
     MONTHLY_QUALITY_SERVICE_CHART_LAYOUT_.width,
     MONTHLY_QUALITY_SERVICE_CHART_LAYOUT_.height
   );
+}
+
+/**
+ * Keep the two small current/previous month issue tables on every quality slide
+ * synchronized to the exact same HubSpot-derived counts used by the charts.
+ */
+function updateMonthlyQualityIssueSummaryTables_(presentation, issueResult) {
+  if (!issueResult || !issueResult.summaries) return;
+
+  const slideLabels = [
+    'All Lines',
+    'MSC',
+    'ARU',
+    'CSC',
+    'Mods',
+    'Gas Heat',
+    'Coatings',
+    'Bard Coatings'
+  ];
+
+  slideLabels.forEach(function(slideLabel) {
+    const summary = issueResult.summaries[slideLabel];
+    if (!summary) return;
+
+    const slide = findMonthlyQualitySlide_(presentation, slideLabel);
+    const tables = slide.getTables().filter(function(table) {
+      return table.getNumRows() === 5 && table.getNumColumns() === 2;
+    });
+
+    if (tables.length < 2) {
+      Logger.log(
+        'Expected two 5x2 issue summary tables on slide ' + slideLabel +
+        '; found ' + tables.length + '.'
+      );
+      return;
+    }
+
+    tables.sort(function(a, b) {
+      return a.getLeft() - b.getLeft();
+    });
+
+    const displayProduct = slideLabel === 'All Lines' ? 'All' : slideLabel;
+    writeMonthlyQualityIssueSummaryTable_(
+      tables[0],
+      issueResult.currentMonthLabel,
+      displayProduct,
+      summary.current
+    );
+    writeMonthlyQualityIssueSummaryTable_(
+      tables[1],
+      issueResult.previousMonthLabel,
+      displayProduct,
+      summary.previous
+    );
+  });
+}
+
+function writeMonthlyQualityIssueSummaryTable_(
+  table,
+  monthLabel,
+  productLabel,
+  counts
+) {
+  table.getCell(0, 0).getText().setText(String(monthLabel || ''));
+  table.getCell(0, 1).getText().setText(String(productLabel || ''));
+
+  const rows = [
+    ['Total', counts.total],
+    ['Startup', counts.startup],
+    ['Warranty', counts.warranty],
+    ['Service', counts.service]
+  ];
+
+  rows.forEach(function(row, index) {
+    table.getCell(index + 1, 0).getText().setText(row[0]);
+    table.getCell(index + 1, 1).getText().setText(String(row[1] || 0));
+  });
 }
 
 function refreshMonthlyQualityLinkedSheetsCharts_(presentation) {
