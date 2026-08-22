@@ -24,7 +24,7 @@ const HUBSPOT_QUALITY_TICKET_PROPERTIES_ = Object.freeze([
   'closed_date',
   'subject',
   'content',
-  'pipeline',
+  'hs_pipeline',
   'hs_pipeline_stage',
   'hs_ticket_category',
   'hs_ticket_priority',
@@ -111,7 +111,7 @@ function syncHubSpotSupportTicketsToSpreadsheet_(spreadsheetId) {
   const allTickets = getAllHubSpotTickets_();
   const supportTickets = allTickets.filter(function(ticket) {
     const properties = ticket.properties || {};
-    return String(properties.pipeline || '') ===
+    return String(properties.hs_pipeline || '') ===
       String(HUBSPOT_QUALITY_CONFIG_.supportPipelineId);
   });
 
@@ -260,7 +260,7 @@ function writeHubSpotSupportTickets_(sheet, tickets, ownerMap) {
       hubSpotQualityDateValue_(p.hs_lastmodifieddate),
       hubSpotQualityDateValue_(p.closed_date),
       p.subject || '',
-      p.pipeline || '',
+      p.hs_pipeline || '',
       p.hs_pipeline_stage || '',
       p.hs_ticket_category || '',
       p.hs_ticket_priority || '',
