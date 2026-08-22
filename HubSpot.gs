@@ -55,10 +55,6 @@ const HUBSPOT_QUALITY_TICKET_PROPERTIES_ = Object.freeze([
   'number_of_service_issues'
 ]);
 
-/**
- * Read-only connection check. Returns one ticket when the key and ticket-read
- * scope are valid.
- */
 function validateHubSpotQualityConnection() {
   const data = hubSpotQualityGetJson_(
     '/crm/v3/objects/tickets?limit=1&archived=false'
@@ -74,10 +70,6 @@ function validateHubSpotQualityConnection() {
   return result;
 }
 
-/**
- * Syncs the complete Support Pipeline into the data workbook for the prior
- * completed quality month. This is safe to run repeatedly.
- */
 function syncHubSpotSupportTickets(asOfDate) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
@@ -92,10 +84,6 @@ function syncHubSpotSupportTickets(asOfDate) {
   }
 }
 
-/**
- * Internal monthly-package hook. Missing credentials do not break FPY/DPPM;
- * the main report can still finish while clearly returning a skipped status.
- */
 function syncHubSpotSupportTicketsToSpreadsheet_(spreadsheetId) {
   if (!getHubSpotQualityToken_()) {
     const skipped = {
@@ -137,10 +125,6 @@ function syncHubSpotSupportTicketsToSpreadsheet_(spreadsheetId) {
   return result;
 }
 
-/**
- * Reads every non-archived HubSpot ticket page before filtering to Support.
- * This deliberately avoids treating the first API page as the full database.
- */
 function getAllHubSpotTickets_() {
   const encodedProperties = encodeURIComponent(
     HUBSPOT_QUALITY_TICKET_PROPERTIES_.join(',')
@@ -294,6 +278,12 @@ function writeHubSpotSupportTickets_(sheet, tickets, ownerMap) {
       p.content || ''
     ];
   });
+
+  const requiredColumns = headers.length;
+  const missingColumns = requiredColumns - sheet.getMaxColumns();
+  if (missingColumns > 0) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), missingColumns);
+  }
 
   const existingFilter = sheet.getFilter();
   if (existingFilter) existingFilter.remove();
