@@ -1,18 +1,29 @@
 /**
- * Builds the monthly service/quality issue chart source from the validated
- * DPPM model rather than from raw HubSpot ticket counts.
+ * Builds the monthly service/quality issue chart source directly from the
+ * synchronized HubSpot Support Pipeline ticket data.
  *
- * IMPORTANT:
- * - DPPM Monthly is the controlled source for these charts.
- * - Startup / Warranty / Service counts therefore reflect the reviewed issue
- *   counts used by the quality report, including MJC responsibility decisions,
- *   deduplication and carryover handling already represented in DPPM Inputs.
- * - Raw HubSpot tickets are NOT counted directly here.
+ * Counting rule (mirrors the HubSpot quality reports):
+ * - ticket is in the Support Pipeline (the raw sync already enforces this)
+ * - Product matches the product chart
+ * - primary Ticket Category is Startup, Warranty, or Service
+ * - MJC No Fault is NOT set
+ *
+ * The exact same filtered counts are also written back to DPPM Inputs for
+ * products that already have a DPPM denominator row. This keeps the service
+ * ticket charts, current/previous month tables, and DPPM calculations on the
+ * same HubSpot source-of-truth method.
  */
 
 const VALIDATED_ISSUE_CHART_DATA_SHEET_ = 'HubSpot Chart Data';
-const VALIDATED_ISSUE_DPPM_MONTHLY_SHEET_ = 'DPPM Monthly';
+const VALIDATED_ISSUE_HUBSPOT_RAW_SHEET_ = 'HubSpot Support Tickets';
+const VALIDATED_ISSUE_DPPM_INPUTS_SHEET_ = 'DPPM Inputs';
 const VALIDATED_ISSUE_DPPM_CONFIG_SHEET_ = 'DPPM Config';
+
+const VALIDATED_ISSUE_COUNTED_CATEGORIES_ = Object.freeze([
+  'Startup',
+  'Warranty',
+  'Service'
+]);
 
 const VALIDATED_ISSUE_PRODUCT_LINES_ = Object.freeze([
   'MSC',
@@ -35,22 +46,26 @@ const VALIDATED_ISSUE_BREAKDOWN_BLOCKS_ = Object.freeze([
 ]);
 
 /**
- * Refresh the 12-month service-ticket chart source tables from DPPM Monthly.
- * Existing pipeline-status data below row 15 is intentionally left alone.
+ * Refresh the 12-month issue chart source from the complete synchronized
+ * HubSpot Support Pipeline dataset and synchronize DPPM Inputs to the same
+ * MJC-No-Fault exclusion logic.
  */
 function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
-  const monthlySheet = spreadsheet.getSheetByName(
-    VALIDATED_ISSUE_DPPM_MONTHLY_SHEET_
+  const rawSheet = spreadsheet.getSheetByName(
+    VALIDATED_ISSUE_HUBSPOT_RAW_SHEET_
   );
-  if (!monthlySheet) {
-    throw new Error('Validated issue chart source is missing "DPPM Monthly".');
+  if (!rawSheet) {
+    throw new Error(
+      'HubSpot ticket source is missing "' +
+      VALIDATED_ISSUE_HUBSPOT_RAW_SHEET_ + '". Run the HubSpot sync first.'
+    );
   }
 
   const configSheet = spreadsheet.getSheetByName(
     VALIDATED_ISSUE_DPPM_CONFIG_SHEET_
   );
   if (!configSheet) {
-    throw new Error('Validated issue chart source is missing "DPPM Config".');
+    throw new Error('Issue chart source is missing "DPPM Config".');
   }
 
   let chartDataSheet = spreadsheet.getSheetByName(
@@ -71,27 +86,26 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
     );
   }
 
-  const data = monthlySheet.getDataRange().getValues();
-  if (data.length < 2) {
-    throw new Error('DPPM Monthly does not contain any data rows.');
+  const rawData = rawSheet.getDataRange().getValues();
+  if (rawData.length < 1) {
+    throw new Error('HubSpot Support Tickets does not contain a header row.');
   }
 
-  const headers = data[0].map(function(value) {
+  const headers = rawData[0].map(function(value) {
     return String(value || '').trim();
   });
   const columns = validatedIssueHeaderMap_(headers);
 
-  const requiredHeaders = [
-    'Month',
-    'Product Line',
-    'Startup Issues',
-    'Warranty Issues',
-    'Service Issues',
-    'Total Issues'
-  ];
-  requiredHeaders.forEach(function(header) {
+  [
+    'Created Date',
+    'Ticket Category',
+    'Product',
+    'MJC No Fault'
+  ].forEach(function(header) {
     if (columns[header] === undefined) {
-      throw new Error('DPPM Monthly is missing required column: ' + header);
+      throw new Error(
+        'HubSpot Support Tickets is missing required column: ' + header
+      );
     }
   });
 
@@ -110,36 +124,62 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
     ));
   }
 
-  const byMonthAndProduct = {};
-  data.slice(1).forEach(function(row) {
-    const month = validatedIssueMonthStart_(row[columns['Month']]);
-    const product = String(row[columns['Product Line']] || '').trim();
-    if (!month || !product) return;
-
-    const key = validatedIssueMonthKey_(month) + '|' + product;
-    const startup = validatedIssueNumberOrZero_(
-      row[columns['Startup Issues']]
-    );
-    const warranty = validatedIssueNumberOrZero_(
-      row[columns['Warranty Issues']]
-    );
-    const service = validatedIssueNumberOrZero_(
-      row[columns['Service Issues']]
-    );
-    const total = validatedIssueNumberOrZero_(
-      row[columns['Total Issues']]
-    );
-
-    byMonthAndProduct[key] = {
-      startup: startup,
-      warranty: warranty,
-      service: service,
-      total: total
-    };
+  const monthKeys = {};
+  months.forEach(function(month) {
+    monthKeys[validatedIssueMonthKey_(month)] = true;
   });
 
-  // A:H = monthly validated issue totals by product.
-  // This drives the all-products service-ticket chart.
+  const byMonthAndProduct = {};
+  let countableTicketCount = 0;
+  let excludedNoFaultCount = 0;
+  let excludedCategoryCount = 0;
+
+  rawData.slice(1).forEach(function(row) {
+    const month = validatedIssueMonthStart_(row[columns['Created Date']]);
+    if (!month) return;
+
+    const monthKey = validatedIssueMonthKey_(month);
+    if (!monthKeys[monthKey]) return;
+
+    const product = String(row[columns['Product']] || '').trim();
+    const category = String(row[columns['Ticket Category']] || '').trim();
+    const noFault = String(row[columns['MJC No Fault']] || '').trim();
+
+    if (noFault) {
+      excludedNoFaultCount++;
+      return;
+    }
+
+    if (VALIDATED_ISSUE_COUNTED_CATEGORIES_.indexOf(category) === -1) {
+      excludedCategoryCount++;
+      return;
+    }
+
+    // HubSpot currently has a single Coatings product enum and no separate
+    // Bard Coatings service enum. Bard Coatings therefore remains zero until
+    // a distinct HubSpot classification exists; do not duplicate Coatings.
+    if (product === 'Bard Coatings') return;
+    if (VALIDATED_ISSUE_PRODUCT_LINES_.indexOf(product) === -1) return;
+
+    const key = monthKey + '|' + product;
+    if (!byMonthAndProduct[key]) {
+      byMonthAndProduct[key] = {
+        startup: 0,
+        warranty: 0,
+        service: 0,
+        total: 0
+      };
+    }
+
+    const record = byMonthAndProduct[key];
+    if (category === 'Startup') record.startup++;
+    if (category === 'Warranty') record.warranty++;
+    if (category === 'Service') record.service++;
+    record.total++;
+    countableTicketCount++;
+  });
+
+  // A:H = monthly countable HubSpot tickets by product.
   const productSummary = [
     ['Month'].concat(VALIDATED_ISSUE_PRODUCT_LINES_)
   ];
@@ -183,16 +223,180 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
       .setNumberFormat('mmm yyyy');
   });
 
+  const dppmInputResult = syncMonthlyQualityDPPMInputsFromHubSpot_(
+    spreadsheet,
+    months,
+    byMonthAndProduct
+  );
+
   SpreadsheetApp.flush();
+
+  const currentMonth = reportMonth;
+  const previousMonth = new Date(
+    reportMonth.getFullYear(),
+    reportMonth.getMonth() - 1,
+    1
+  );
+  const summaries = buildMonthlyQualityIssueSummaries_(
+    currentMonth,
+    previousMonth,
+    byMonthAndProduct
+  );
 
   return {
     status: 'READY',
-    source: VALIDATED_ISSUE_DPPM_MONTHLY_SHEET_,
+    source: VALIDATED_ISSUE_HUBSPOT_RAW_SHEET_,
+    method: 'Support Pipeline + Product + Startup/Warranty/Service + MJC No Fault blank',
     chartDataSheet: VALIDATED_ISSUE_CHART_DATA_SHEET_,
     reportMonth: validatedIssueMonthKey_(reportMonth),
+    currentMonthLabel: Utilities.formatDate(reportMonth, 'UTC', 'MMM'),
+    previousMonthLabel: Utilities.formatDate(previousMonth, 'UTC', 'MMM'),
     monthsWritten: months.length,
-    productLines: VALIDATED_ISSUE_PRODUCT_LINES_.slice()
+    productLines: VALIDATED_ISSUE_PRODUCT_LINES_.slice(),
+    countableTicketCount: countableTicketCount,
+    excludedNoFaultCount: excludedNoFaultCount,
+    excludedCategoryCount: excludedCategoryCount,
+    dppmInputsUpdated: dppmInputResult.rowsUpdated,
+    summaries: summaries
   };
+}
+
+/**
+ * Update only Startup/Warranty/Service columns on existing DPPM Inputs rows.
+ * Unit shipment denominators are deliberately untouched. This is performed for
+ * the same 12-month window shown in the report, so historical chart points in
+ * that window use the same HubSpot filter method as the service-ticket charts.
+ */
+function syncMonthlyQualityDPPMInputsFromHubSpot_(
+  spreadsheet,
+  months,
+  byMonthAndProduct
+) {
+  const inputSheet = spreadsheet.getSheetByName(
+    VALIDATED_ISSUE_DPPM_INPUTS_SHEET_
+  );
+  if (!inputSheet) {
+    throw new Error('Issue source is missing "DPPM Inputs".');
+  }
+
+  const lastRow = inputSheet.getLastRow();
+  if (lastRow < 2) return { rowsUpdated: 0 };
+
+  const data = inputSheet.getRange(2, 1, lastRow - 1, 6).getValues();
+  const monthKeys = {};
+  months.forEach(function(month) {
+    monthKeys[validatedIssueMonthKey_(month)] = true;
+  });
+
+  const dppmProducts = {
+    'MSC': true,
+    'ARU': true,
+    'CSC': true,
+    'Mods': true,
+    'Gas Heat': true,
+    'Coatings': true,
+    'Bard Coatings': true
+  };
+
+  const output = [];
+  let rowsUpdated = 0;
+
+  data.forEach(function(row) {
+    const month = validatedIssueMonthStart_(row[0]);
+    const product = String(row[1] || '').trim();
+    let startup = row[3];
+    let warranty = row[4];
+    let service = row[5];
+
+    if (month && monthKeys[validatedIssueMonthKey_(month)] && dppmProducts[product]) {
+      const record = byMonthAndProduct[
+        validatedIssueMonthKey_(month) + '|' + product
+      ];
+      startup = record ? record.startup : 0;
+      warranty = record ? record.warranty : 0;
+      service = record ? record.service : 0;
+      rowsUpdated++;
+    }
+
+    output.push([startup, warranty, service]);
+  });
+
+  inputSheet.getRange(2, 4, output.length, 3).setValues(output);
+  return { rowsUpdated: rowsUpdated };
+}
+
+function buildMonthlyQualityIssueSummaries_(
+  currentMonth,
+  previousMonth,
+  byMonthAndProduct
+) {
+  const summaries = {};
+  VALIDATED_ISSUE_PRODUCT_LINES_.forEach(function(product) {
+    summaries[product] = {
+      current: monthlyQualityIssueRecord_(
+        byMonthAndProduct,
+        currentMonth,
+        product
+      ),
+      previous: monthlyQualityIssueRecord_(
+        byMonthAndProduct,
+        previousMonth,
+        product
+      )
+    };
+  });
+
+  const allProductsForDPPM = ['MSC', 'ARU', 'CSC'];
+  summaries['All Lines'] = {
+    current: monthlyQualityIssueSumProducts_(
+      byMonthAndProduct,
+      currentMonth,
+      allProductsForDPPM
+    ),
+    previous: monthlyQualityIssueSumProducts_(
+      byMonthAndProduct,
+      previousMonth,
+      allProductsForDPPM
+    )
+  };
+  return summaries;
+}
+
+function monthlyQualityIssueRecord_(byMonthAndProduct, month, product) {
+  const record = byMonthAndProduct[
+    validatedIssueMonthKey_(month) + '|' + product
+  ];
+  return record ? {
+    startup: record.startup,
+    warranty: record.warranty,
+    service: record.service,
+    total: record.total
+  } : {
+    startup: 0,
+    warranty: 0,
+    service: 0,
+    total: 0
+  };
+}
+
+function monthlyQualityIssueSumProducts_(
+  byMonthAndProduct,
+  month,
+  products
+) {
+  const total = { startup: 0, warranty: 0, service: 0, total: 0 };
+  products.forEach(function(product) {
+    const record = monthlyQualityIssueRecord_(
+      byMonthAndProduct,
+      month,
+      product
+    );
+    total.startup += record.startup;
+    total.warranty += record.warranty;
+    total.service += record.service;
+    total.total += record.total;
+  });
+  return total;
 }
 
 function validatedIssueHeaderMap_(headers) {
@@ -216,10 +420,4 @@ function validatedIssueMonthStart_(value) {
 
 function validatedIssueMonthKey_(date) {
   return Utilities.formatDate(date, 'UTC', 'yyyy-MM');
-}
-
-function validatedIssueNumberOrZero_(value) {
-  if (value === '' || value === null || value === undefined) return 0;
-  const number = Number(value);
-  return isNaN(number) ? 0 : number;
 }
