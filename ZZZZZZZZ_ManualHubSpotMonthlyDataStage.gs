@@ -21,6 +21,24 @@ const MONTHLY_QUALITY_MANUAL_HUBSPOT_OVERRIDES_ = Object.freeze({
   })
 });
 
+/**
+ * Parse YYYY-MM without going through Date.parse()/new Date(string).
+ * ISO date strings are interpreted as UTC by JavaScript; in an America/New_York
+ * Apps Script project, 2026-08-01T00:00:00Z is still July 31 locally. That can
+ * shift the report month backward. Building the Date from numeric local parts
+ * avoids that month-boundary bug.
+ */
+function monthlyQualityManualMonthFromKey_(monthKey) {
+  const match = /^(\d{4})-(\d{2})$/.exec(String(monthKey || '').trim());
+  if (!match) return null;
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!year || month < 1 || month > 12) return null;
+
+  return new Date(year, month - 1, 1);
+}
+
 function populateMonthlyQualityDataStage_(context, dataStage) {
   const spreadsheetId = dataStage.dataFile.getId();
   const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
@@ -94,7 +112,7 @@ function prepareMonthlyQualityManualHubSpotWindow_(spreadsheet, reportMonthKey) 
     throw new Error('Manual HubSpot mode is missing "HubSpot Chart Data".');
   }
 
-  const reportMonth = validatedIssueMonthStart_(reportMonthKey + '-01');
+  const reportMonth = monthlyQualityManualMonthFromKey_(reportMonthKey);
   if (!reportMonth) {
     throw new Error('Invalid manual HubSpot report month: ' + reportMonthKey);
   }
@@ -203,6 +221,32 @@ function prepareMonthlyQualityManualHubSpotWindow_(spreadsheet, reportMonthKey) 
   });
   plant.total = plant.startup + plant.warranty + plant.service;
 
+  // This assertion specifically catches month-window regressions before the
+  // older reader throws a less useful "missing month" message.
+  const expectedPlant = ['MSC', 'ARU', 'CSC'].reduce(function(total, product) {
+    const record = override[product] || { startup: 0, warranty: 0, service: 0 };
+    total.startup += Number(record.startup) || 0;
+    total.warranty += Number(record.warranty) || 0;
+    total.service += Number(record.service) || 0;
+    return total;
+  }, { startup: 0, warranty: 0, service: 0 });
+  expectedPlant.total = expectedPlant.startup + expectedPlant.warranty + expectedPlant.service;
+
+  if (
+    plant.startup !== expectedPlant.startup ||
+    plant.warranty !== expectedPlant.warranty ||
+    plant.service !== expectedPlant.service ||
+    plant.total !== expectedPlant.total
+  ) {
+    throw new Error(
+      'Manual HubSpot month preparation failed for ' + reportMonthKey +
+      '. Expected All Lines ' + expectedPlant.total +
+      ' (' + expectedPlant.startup + '/' + expectedPlant.warranty + '/' + expectedPlant.service +
+      '), prepared ' + plant.total +
+      ' (' + plant.startup + '/' + plant.warranty + '/' + plant.service + ').'
+    );
+  }
+
   Logger.log(
     'Manual HubSpot window prepared through ' + reportMonthKey +
     ': All Lines=' + plant.total +
@@ -229,7 +273,7 @@ function syncMonthlyQualityDPPMInputsFromExistingSummary_(spreadsheet, issueResu
     throw new Error('Manual HubSpot mode could not determine the report month.');
   }
 
-  const reportMonth = validatedIssueMonthStart_(reportMonthKey + '-01');
+  const reportMonth = monthlyQualityManualMonthFromKey_(reportMonthKey);
   if (!reportMonth) {
     throw new Error('Manual HubSpot mode has an invalid report month: ' + reportMonthKey);
   }
