@@ -24,12 +24,17 @@ const MONTHLY_QUALITY_MANUAL_HUBSPOT_OVERRIDES_ = Object.freeze({
 function populateMonthlyQualityDataStage_(context, dataStage) {
   const spreadsheetId = dataStage.dataFile.getId();
   const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+  const reportMonthKey = String(context.monthKey || '').trim();
 
   Logger.log(
     'Monthly Quality: HubSpot API sync intentionally bypassed; using manually audited values.'
   );
 
-  // Read the existing 12-month table first so prior months remain unchanged.
+  // IMPORTANT: a July-based template does not yet contain an August row.
+  // Roll the 12-month HubSpot chart-data window forward and inject the audited
+  // current month BEFORE any code tries to read the report month.
+  prepareMonthlyQualityManualHubSpotWindow_(spreadsheet, reportMonthKey);
+
   const issueChartData = readMonthlyQualityExistingIssueChartData_(spreadsheet);
   if (!issueChartData || issueChartData.status !== 'READY') {
     throw new Error(
@@ -37,12 +42,8 @@ function populateMonthlyQualityDataStage_(context, dataStage) {
     );
   }
 
-  // If the report month has been manually audited, apply that audited month to
-  // the workbook source tables before any chart or DPPM refresh occurs.
-  applyMonthlyQualityManualHubSpotOverride_(spreadsheet, issueChartData);
-
-  // Keep DPPM Inputs aligned with the same manually validated values used by
-  // the service-ticket summary tables and charts. Units Shipped is preserved.
+  // Keep DPPM Inputs aligned with exactly the same manually audited values used
+  // by the service-ticket summary tables and charts. Units Shipped is preserved.
   syncMonthlyQualityDPPMInputsFromExistingSummary_(spreadsheet, issueChartData);
 
   ensureMonthlyQualityPackageDPPMModel_(spreadsheet, context);
@@ -73,18 +74,17 @@ function populateMonthlyQualityDataStage_(context, dataStage) {
 }
 
 /**
- * Apply a manually audited report-month override to HubSpot Chart Data and the
- * in-memory summary that is later written to Slides.
+ * Rebuild HubSpot Chart Data to the exact 12 months ending in reportMonthKey.
+ * Existing historical values are retained by month. The current report month
+ * is taken from the manually audited override table above.
  */
-function applyMonthlyQualityManualHubSpotOverride_(spreadsheet, issueResult) {
-  const reportMonthKey = String(issueResult.reportMonth || '').trim();
+function prepareMonthlyQualityManualHubSpotWindow_(spreadsheet, reportMonthKey) {
   const override = MONTHLY_QUALITY_MANUAL_HUBSPOT_OVERRIDES_[reportMonthKey];
   if (!override) {
-    Logger.log(
-      'Manual HubSpot mode: no explicit override for ' + reportMonthKey +
-      '; retaining existing validated workbook values.'
+    throw new Error(
+      'Manual HubSpot mode has no audited values configured for ' +
+      reportMonthKey + '. Add the month to MONTHLY_QUALITY_MANUAL_HUBSPOT_OVERRIDES_ before running.'
     );
-    return false;
   }
 
   const chartDataSheet = spreadsheet.getSheetByName(
@@ -96,95 +96,119 @@ function applyMonthlyQualityManualHubSpotOverride_(spreadsheet, issueResult) {
 
   const reportMonth = validatedIssueMonthStart_(reportMonthKey + '-01');
   if (!reportMonth) {
-    throw new Error('Invalid manual HubSpot override month: ' + reportMonthKey);
+    throw new Error('Invalid manual HubSpot report month: ' + reportMonthKey);
   }
 
-  VALIDATED_ISSUE_PRODUCT_LINES_.forEach(function(product) {
-    const values = override[product] || { startup: 0, warranty: 0, service: 0 };
-    const record = {
-      startup: Number(values.startup) || 0,
-      warranty: Number(values.warranty) || 0,
-      service: Number(values.service) || 0
-    };
-    record.total = record.startup + record.warranty + record.service;
+  const months = [];
+  for (let offset = 11; offset >= 0; offset--) {
+    months.push(new Date(
+      reportMonth.getFullYear(),
+      reportMonth.getMonth() - offset,
+      1
+    ));
+  }
 
-    if (!issueResult.summaries[product]) {
-      issueResult.summaries[product] = {};
-    }
-    issueResult.summaries[product].current = record;
+  const currentByProduct = {};
 
-    const block = VALIDATED_ISSUE_BREAKDOWN_BLOCKS_.filter(function(item) {
-      return item.product === product;
-    })[0];
+  VALIDATED_ISSUE_BREAKDOWN_BLOCKS_.forEach(function(block) {
+    const oldRows = chartDataSheet
+      .getRange(2, block.startColumn, 12, 4)
+      .getValues();
+    const oldByMonth = {};
 
-    if (block) {
-      const monthValues = chartDataSheet
-        .getRange(2, block.startColumn, 12, 1)
-        .getValues();
-      let targetRow = null;
+    oldRows.forEach(function(row) {
+      const month = validatedIssueMonthStart_(row[0]);
+      if (!month) return;
+      oldByMonth[validatedIssueMonthKey_(month)] = {
+        startup: Number(row[1]) || 0,
+        warranty: Number(row[2]) || 0,
+        service: Number(row[3]) || 0
+      };
+    });
 
-      monthValues.forEach(function(row, index) {
-        const month = validatedIssueMonthStart_(row[0]);
-        if (month && validatedIssueMonthKey_(month) === reportMonthKey) {
-          targetRow = index + 2;
-        }
-      });
+    const newRows = months.map(function(month) {
+      const key = validatedIssueMonthKey_(month);
+      let record = oldByMonth[key] || { startup: 0, warranty: 0, service: 0 };
 
-      if (!targetRow) {
-        throw new Error(
-          'HubSpot Chart Data is missing ' + reportMonthKey + ' for ' + product + '.'
-        );
+      if (key === reportMonthKey) {
+        const audited = override[block.product] || {
+          startup: 0,
+          warranty: 0,
+          service: 0
+        };
+        record = {
+          startup: Number(audited.startup) || 0,
+          warranty: Number(audited.warranty) || 0,
+          service: Number(audited.service) || 0
+        };
+        currentByProduct[block.product] = record;
       }
 
-      chartDataSheet.getRange(targetRow, block.startColumn + 1, 1, 3).setValues([[
-        record.startup,
-        record.warranty,
-        record.service
-      ]]);
-    }
+      return [month, record.startup, record.warranty, record.service];
+    });
+
+    chartDataSheet
+      .getRange(2, block.startColumn, 12, 4)
+      .setValues(newRows);
+    chartDataSheet
+      .getRange(2, block.startColumn, 12, 1)
+      .setNumberFormat('mmm yyyy');
   });
 
-  // A:H contains monthly total countable tickets by product.
-  const summaryMonths = chartDataSheet.getRange(2, 1, 12, 1).getValues();
-  let summaryRow = null;
-  summaryMonths.forEach(function(row, index) {
-    const month = validatedIssueMonthStart_(row[0]);
-    if (month && validatedIssueMonthKey_(month) === reportMonthKey) {
-      summaryRow = index + 2;
-    }
+  // A:H is the total count by product. Rebuild it from the same breakdown
+  // blocks so the product totals can never disagree with Startup/Warranty/Service.
+  const productMaps = {};
+  VALIDATED_ISSUE_BREAKDOWN_BLOCKS_.forEach(function(block) {
+    const rows = chartDataSheet
+      .getRange(2, block.startColumn, 12, 4)
+      .getValues();
+    productMaps[block.product] = {};
+
+    rows.forEach(function(row) {
+      const month = validatedIssueMonthStart_(row[0]);
+      if (!month) return;
+      productMaps[block.product][validatedIssueMonthKey_(month)] =
+        (Number(row[1]) || 0) +
+        (Number(row[2]) || 0) +
+        (Number(row[3]) || 0);
+    });
   });
 
-  if (!summaryRow) {
-    throw new Error('HubSpot Chart Data summary is missing ' + reportMonthKey + '.');
-  }
-
-  const totals = VALIDATED_ISSUE_PRODUCT_LINES_.map(function(product) {
-    const record = issueResult.summaries[product].current;
-    return Number(record.total) || 0;
+  const summaryRows = months.map(function(month) {
+    const key = validatedIssueMonthKey_(month);
+    const row = [month];
+    VALIDATED_ISSUE_PRODUCT_LINES_.forEach(function(product) {
+      row.push(Number(productMaps[product] && productMaps[product][key]) || 0);
+    });
+    return row;
   });
-  chartDataSheet.getRange(summaryRow, 2, 1, totals.length).setValues([totals]);
 
-  // Plant reporting intentionally includes MSC + ARU + CSC only.
+  chartDataSheet
+    .getRange(2, 1, 12, 1 + VALIDATED_ISSUE_PRODUCT_LINES_.length)
+    .setValues(summaryRows);
+  chartDataSheet.getRange(2, 1, 12, 1).setNumberFormat('mmm yyyy');
+
+  SpreadsheetApp.flush();
+
   const plant = { startup: 0, warranty: 0, service: 0, total: 0 };
   ['MSC', 'ARU', 'CSC'].forEach(function(product) {
-    const record = issueResult.summaries[product].current;
+    const record = currentByProduct[product] || {
+      startup: 0,
+      warranty: 0,
+      service: 0
+    };
     plant.startup += Number(record.startup) || 0;
     plant.warranty += Number(record.warranty) || 0;
     plant.service += Number(record.service) || 0;
-    plant.total += Number(record.total) || 0;
   });
-  issueResult.summaries['All Lines'].current = plant;
+  plant.total = plant.startup + plant.warranty + plant.service;
 
-  issueResult.source = 'Manual audited HubSpot override';
-  issueResult.method =
-    'Support Pipeline + Startup/Warranty/Service + MJC No Fault blank; manually audited while API offline';
-
-  SpreadsheetApp.flush();
   Logger.log(
-    'Manual HubSpot override applied for ' + reportMonthKey +
+    'Manual HubSpot window prepared through ' + reportMonthKey +
     ': All Lines=' + plant.total +
     ' (' + plant.startup + '/' + plant.warranty + '/' + plant.service + ').'
   );
+
   return true;
 }
 
