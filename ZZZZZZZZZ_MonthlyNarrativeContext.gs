@@ -3,16 +3,10 @@
  *
  * The numeric report is deterministic and belongs in Apps Script. The plain-English
  * explanation of what those failures mean for the floor needs authored context.
- * This file adds that bridge without manually editing the Slides deck:
- *   1. the standard monthly report finalizer runs first;
- *   2. a "Monthly Report Context" sheet is seeded/read for the report month;
- *   3. one context slide is added after Plant Summary, MSC, CSC, and ARU;
- *   4. reruns remove and recreate the context slides so duplicates are avoided.
  *
- * Future month workflow:
- *   - ChatGPT reviews the audited HubSpot tickets for the month;
- *   - ChatGPT or the user updates the "Monthly Report Context" tab;
- *   - calculateFPYSummary_FINAL() is rerun.
+ * This file does NOT stop at creating a data tab. It uses the tab as an editable
+ * source, then inserts one "Top 3 Highest-Impact Issues" context slide after the
+ * Plant Summary, MSC, CSC, and ARU metric slides.
  */
 
 const MONTHLY_QUALITY_CONTEXT_SHEET_NAME_ = 'Monthly Report Context';
@@ -24,67 +18,113 @@ const MONTHLY_QUALITY_CONTEXT_SECTIONS_ = Object.freeze([
   'ARU'
 ]);
 
+const MONTHLY_QUALITY_CONTEXT_HEADERS_ = Object.freeze([
+  'Report Month',
+  'Section',
+  'Headline',
+  'Issue 1 - Highest Impact',
+  'Why Issue 1 Matters',
+  'Issue 2',
+  'Why Issue 2 Matters',
+  'Issue 3',
+  'Why Issue 3 Matters',
+  'Floor Takeaway',
+  'What We Are Doing'
+]);
+
 const MONTHLY_QUALITY_CHATGPT_CONTEXT_OVERRIDES_ = Object.freeze({
   '2026-08': Object.freeze({
     'All Lines': Object.freeze({
       headline: '17 MSC / CSC / ARU customer failure tickets were counted in August.',
-      experienced: [
-        'The issues were not all the same type: 3 startup, 13 warranty, and 1 service ticket.',
-        'The largest themes were electrical / controls, refrigeration, missing shipment items, and repeat field conditions.',
-        'One separate coatings warranty issue was also logged for cosmetic damage / cover latch fit.'
-      ],
-      themes: ['Electrical / Controls', 'Refrigeration', 'Ship-With Completeness', 'Repeat Field Conditions'],
-      takeaway: 'The number is not just a score. It tells us what reached the customer and where our factory checks, shipment verification, and corrective actions need to prevent repeats.',
-      actions: [
+      issues: Object.freeze([
+        Object.freeze({
+          title: 'Electrical / controls failures across multiple product lines',
+          why: 'Relays/contactors, fan-proving switches, refrigerant monitors, temperature sensors, and flow devices all showed up in August. These failures create alarms, downtime, or failed startup conditions for customers.'
+        }),
+        Object.freeze({
+          title: 'Refrigeration reliability and leak concerns',
+          why: 'Compressor failures, drive trips, TXV concerns, and refrigerant leaks were part of the August mix. These are high-impact because they usually stop the unit from operating normally and create warranty cost.'
+        }),
+        Object.freeze({
+          title: 'Shipment completeness and field-readiness problems',
+          why: 'Missing fittings, missing sensors, and cabinet/filter-door fit concerns are easier for the floor to understand and prevent. They should be caught before the unit or parts leave MJC.'
+        })
+      ]),
+      takeaway: 'The number is not just a score. It tells us what reached the customer and where factory checks, shipment verification, and corrective actions need to stop repeat problems.',
+      actions: Object.freeze([
+        'Keep questions and documentation-only requests out of the failure count.',
         'Use ticket descriptions to connect DPPM numbers to real customer problems.',
-        'Keep questions and documentation requests out of the failure count.',
-        'Drive repeat issues into CAPA or focused internal follow-up.'
-      ]
+        'Drive repeat electrical, refrigeration, and shipment-completeness issues into CAPA or focused internal follow-up.'
+      ])
     }),
     'MSC': Object.freeze({
       headline: 'MSC had 7 reported failure tickets in August.',
-      experienced: [
-        'Startup issues included missing grooved fittings and missing water-pressure sensors.',
-        'Warranty issues included failed compressor-control relays, TXV concerns, compressor failures, and repeated flow-switch / safety-circuit concerns.',
-        'One service issue involved a compressor drive fault shortly after startup.'
-      ],
-      themes: ['Ship-With Completeness', 'Electrical / Controls', 'Refrigeration Components', 'Flow / Safety Circuit'],
-      takeaway: 'Several MSC problems are directly tied to things the plant can influence: complete shipment checks, wiring / controls verification, and catching abnormal refrigeration or component issues before release.',
-      actions: [
+      issues: Object.freeze([
+        Object.freeze({
+          title: 'Compressor / drive / refrigeration reliability',
+          why: 'MSC tickets included compressor failure or over-amping, a compressor drive fault, and TXV concerns. These are severe because they affect whether the unit can run and usually require field repair or warranty parts.'
+        }),
+        Object.freeze({
+          title: 'Missing ship-with material',
+          why: 'Startup tickets included missing grooved fittings and missing water-pressure sensors. These issues delay startup and are directly tied to shipment verification before the product leaves MJC.'
+        }),
+        Object.freeze({
+          title: 'Flow-switch / safety-circuit repeat concerns',
+          why: 'Repeated flow-switch or safety-circuit concerns create field troubleshooting time and repeat customer frustration. This is a focused follow-up item, not just a one-time service call.'
+        })
+      ]),
+      takeaway: 'Several MSC problems are tied to things the plant can influence: complete shipment checks, wiring / controls verification, and catching abnormal refrigeration or component conditions before release.',
+      actions: Object.freeze([
         'Reinforce ship-with verification before shipment.',
-        'Use the issue list to target final inspection checks for wiring, relays, flow switches, and refrigeration components.',
+        'Use the issue list to target final inspection checks for relays, flow switches, wiring, and refrigeration components.',
         'Treat repeated flow-switch / safety-circuit conditions as a focused follow-up item.'
-      ]
+      ])
     }),
     'CSC': Object.freeze({
       headline: 'CSC had 5 reported failure tickets in August.',
-      experienced: [
-        'Customers reported a failed compressor contactor, a failed flow switch, and an ECM supply-fan issue.',
-        'Two refrigerant leak repair tickets were also counted for CSC units.',
-        'The month was driven by electrical component reliability and refrigeration leak concerns.'
-      ],
-      themes: ['Electrical Components', 'Refrigeration Leaks', 'Fan / Flow Devices'],
+      issues: Object.freeze([
+        Object.freeze({
+          title: 'Refrigerant leak repairs',
+          why: 'Two CSC tickets involved refrigerant leak repairs. These are high-impact because they affect unit operation, require field labor/refrigerant, and should reinforce leak-prevention and leak-check discipline.'
+        }),
+        Object.freeze({
+          title: 'Electrical component failures',
+          why: 'CSC tickets included a compressor contactor failure and a failed flow switch. These failures can trip breakers, create alarms, or stop normal operation.'
+        }),
+        Object.freeze({
+          title: 'Fan / airflow device reliability',
+          why: 'One CSC issue involved an ECM supply fan not starting consistently. Fan and airflow device verification remains important during test and inspection.'
+        })
+      ]),
       takeaway: 'CSC issues show why electrical checks, fan / flow device verification, and leak-prevention discipline remain critical before units leave MJC.',
-      actions: [
+      actions: Object.freeze([
         'Continue verifying contactors, flow devices, and ECM fan operation during test / inspection.',
         'Use leak tickets to reinforce refrigeration workmanship and leak-check expectations.',
         'Watch for repeat components that need supplier or design follow-up.'
-      ]
+      ])
     }),
     'ARU': Object.freeze({
       headline: 'ARU had 5 reported failure tickets in August.',
-      experienced: [
-        'Electrical / controls items included fan-proving switch failures, a bad refrigerant monitor, and a faulty discharge-air temperature sensor.',
-        'One evaporator-coil leak remained under investigation.',
-        'One cabinet / filter-door condition repeated a prior field issue.'
-      ],
-      themes: ['Electrical / Controls Devices', 'Refrigerant Leak', 'Cabinet / Door Fit', 'Repeat Conditions'],
+      issues: Object.freeze([
+        Object.freeze({
+          title: 'Repeat fan-proving switch failures',
+          why: 'Fan-proving switch failures were reported again across Niagara ARUs. Repeat field failures need returned-part analysis and clear ownership so they do not become recurring customer issues.'
+        }),
+        Object.freeze({
+          title: 'Electrical / controls device failures',
+          why: 'ARU tickets included a failed refrigerant monitor and a faulty discharge-air temperature sensor. These devices can create safety, alarm, or control problems in the field.'
+        }),
+        Object.freeze({
+          title: 'Coil leak and cabinet / filter-door fit concerns',
+          why: 'One ARU evaporator-coil leak remained under investigation, and one cabinet/filter-door condition repeated a prior field issue. Both need evidence-based follow-up rather than one-off fixes.'
+        })
+      ]),
       takeaway: 'ARU issues are highly custom and often field-specific, but repeat device failures and cabinet-fit concerns still need clear ownership and follow-through.',
-      actions: [
+      actions: Object.freeze([
         'Track returned fan-proving switches and failed devices for analysis.',
         'Keep coil leak evidence tied to the unit and repair decision.',
         'Use the repeat filter-door issue to drive a standard fix, not a one-off repair.'
-      ]
+      ])
     })
   })
 });
@@ -98,10 +138,7 @@ updateMonthlyQualityPackageDPPM_ = function(packageResult) {
   const issueResult = result.validatedIssueChartData ||
     readMonthlyQualityExistingIssueChartData_(spreadsheet);
 
-  const contextResult = prepareMonthlyQualityNarrativeContext_(
-    spreadsheet,
-    issueResult
-  );
+  const contextResult = prepareMonthlyQualityNarrativeContext_(spreadsheet, issueResult);
 
   if (!contextResult || !contextResult.sections || !contextResult.sections.length) {
     Logger.log('Monthly Quality narrative context skipped: no context rows found.');
@@ -113,10 +150,7 @@ updateMonthlyQualityPackageDPPM_ = function(packageResult) {
   }
 
   const presentation = SlidesApp.openById(packageResult.deckFile.getId());
-  const slideResult = updateMonthlyQualityNarrativeContextSlides_(
-    presentation,
-    contextResult
-  );
+  const slideResult = updateMonthlyQualityNarrativeContextSlides_(presentation, contextResult);
   presentation.saveAndClose();
 
   result.narrativeContext = {
@@ -157,20 +191,23 @@ function ensureMonthlyQualityNarrativeContextSheet_(spreadsheet) {
     sheet = spreadsheet.insertSheet(MONTHLY_QUALITY_CONTEXT_SHEET_NAME_);
   }
 
-  const headers = [[
-    'Report Month',
-    'Section',
-    'Headline',
-    'What Customers Experienced',
-    'Main Themes',
-    'Floor Takeaway',
-    'What We Are Doing'
-  ]];
+  const lastColumn = Math.max(sheet.getLastColumn(), MONTHLY_QUALITY_CONTEXT_HEADERS_.length);
+  const existingHeaders = sheet.getRange(1, 1, 1, lastColumn).getValues()[0]
+    .map(function(value) { return String(value || '').trim(); });
+  const expectedHeaders = MONTHLY_QUALITY_CONTEXT_HEADERS_.slice();
+  const headersMatch = expectedHeaders.every(function(header, index) {
+    return existingHeaders[index] === header;
+  });
 
-  sheet.getRange(1, 1, 1, headers[0].length).setValues(headers);
-  sheet.getRange(1, 1, 1, headers[0].length).setFontWeight('bold');
+  if (!headersMatch) {
+    sheet.clear();
+  }
+
+  sheet.getRange(1, 1, 1, expectedHeaders.length).setValues([expectedHeaders]);
+  sheet.getRange(1, 1, 1, expectedHeaders.length).setFontWeight('bold');
   sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, headers[0].length);
+  sheet.getRange(1, 1, Math.max(sheet.getLastRow(), 1), expectedHeaders.length).setWrap(true);
+  sheet.autoResizeColumns(1, expectedHeaders.length);
   return sheet;
 }
 
@@ -183,12 +220,17 @@ function seedMonthlyQualityNarrativeContextRows_(sheet, reportMonth) {
 
   const rows = MONTHLY_QUALITY_CONTEXT_SECTIONS_.map(function(section) {
     const item = override[section] || {};
+    const issues = item.issues || [];
     return [
       reportMonth,
       section,
       item.headline || '',
-      Array.isArray(item.experienced) ? item.experienced.join('\n') : String(item.experienced || ''),
-      Array.isArray(item.themes) ? item.themes.join('\n') : String(item.themes || ''),
+      issues[0] ? issues[0].title : '',
+      issues[0] ? issues[0].why : '',
+      issues[1] ? issues[1].title : '',
+      issues[1] ? issues[1].why : '',
+      issues[2] ? issues[2].title : '',
+      issues[2] ? issues[2].why : '',
       item.takeaway || '',
       Array.isArray(item.actions) ? item.actions.join('\n') : String(item.actions || '')
     ];
@@ -196,8 +238,8 @@ function seedMonthlyQualityNarrativeContextRows_(sheet, reportMonth) {
 
   const startRow = sheet.getLastRow() + 1;
   sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
-  sheet.getRange(startRow, 4, rows.length, 4).setWrap(true);
-  sheet.autoResizeColumns(1, 7);
+  sheet.getRange(startRow, 4, rows.length, 8).setWrap(true);
+  sheet.autoResizeColumns(1, MONTHLY_QUALITY_CONTEXT_HEADERS_.length);
   return true;
 }
 
@@ -205,7 +247,7 @@ function readMonthlyQualityNarrativeContextRows_(sheet, reportMonth) {
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
-  const values = sheet.getRange(2, 1, lastRow - 1, 7).getValues();
+  const values = sheet.getRange(2, 1, lastRow - 1, MONTHLY_QUALITY_CONTEXT_HEADERS_.length).getValues();
   const rows = [];
 
   values.forEach(function(row) {
@@ -218,10 +260,13 @@ function readMonthlyQualityNarrativeContextRows_(sheet, reportMonth) {
     rows.push({
       section: section,
       headline: String(row[2] || '').trim(),
-      experienced: monthlyQualityNarrativeSplitLines_(row[3]),
-      themes: monthlyQualityNarrativeSplitLines_(row[4]),
-      takeaway: String(row[5] || '').trim(),
-      actions: monthlyQualityNarrativeSplitLines_(row[6])
+      issues: [
+        { title: String(row[3] || '').trim(), why: String(row[4] || '').trim() },
+        { title: String(row[5] || '').trim(), why: String(row[6] || '').trim() },
+        { title: String(row[7] || '').trim(), why: String(row[8] || '').trim() }
+      ].filter(function(issue) { return issue.title || issue.why; }),
+      takeaway: String(row[9] || '').trim(),
+      actions: monthlyQualityNarrativeSplitLines_(row[10])
     });
   });
 
@@ -244,24 +289,14 @@ function updateMonthlyQualityNarrativeContextSlides_(presentation, contextResult
     bySection[row.section] = row;
   });
 
-  // Insert in reverse order so each new slide lands immediately after its
-  // matching metric slide without changing the positions of earlier targets.
   MONTHLY_QUALITY_CONTEXT_SECTIONS_.slice().reverse().forEach(function(section) {
     const record = bySection[section];
     if (!record) return;
 
     const mainIndex = findMonthlyQualitySlideIndex_(presentation, section);
-    const slide = presentation.insertSlide(
-      mainIndex + 1,
-      SlidesApp.PredefinedLayout.BLANK
-    );
+    const slide = presentation.insertSlide(mainIndex + 1, SlidesApp.PredefinedLayout.BLANK);
 
-    drawMonthlyQualityNarrativeSlide_(
-      slide,
-      section,
-      record,
-      contextResult.monthLabel
-    );
+    drawMonthlyQualityNarrativeSlide_(slide, section, record, contextResult.monthLabel);
     slidesUpdated++;
   });
 
@@ -283,6 +318,7 @@ function isMonthlyQualityNarrativeContextSlide_(slide) {
     const element = elements[index];
     if (element.getPageElementType() !== SlidesApp.PageElementType.SHAPE) continue;
     const text = element.asShape().getText().asString().trim();
+    if (text.indexOf('Top 3 Customer Issue Context - ') === 0) return true;
     if (text.indexOf('Customer Issue Context - ') === 0) return true;
   }
   return false;
@@ -306,56 +342,79 @@ function findMonthlyQualitySlideIndex_(presentation, slideLabel) {
 }
 
 function drawMonthlyQualityNarrativeSlide_(slide, section, record, monthLabel) {
-  const pageWidth = slide.getParent().getPageWidth();
-  const pageHeight = slide.getParent().getPageHeight();
-  const margin = 36;
-  const gap = 18;
-  const titleHeight = 46;
-  const footerHeight = 18;
-  const top = margin + titleHeight + 12;
-  const leftColWidth = (pageWidth - (margin * 2) - gap) * 0.58;
-  const rightColWidth = pageWidth - (margin * 2) - gap - leftColWidth;
-  const boxHeight = pageHeight - top - margin - footerHeight;
+  // Standard wide Google Slides deck size in points. Using constants avoids a
+  // Slide.getParent() call, which is not available in Apps Script.
+  const pageWidth = 720;
+  const pageHeight = 405;
+  const margin = 28;
+  const gap = 14;
+  const titleHeight = 38;
+  const footerHeight = 16;
+  const top = 72;
+  const issueColWidth = 424;
+  const rightColWidth = pageWidth - (margin * 2) - gap - issueColWidth;
+  const issueBoxHeight = 78;
+  const issueGap = 10;
+  const rightBoxHeight = 248;
 
   slide.getBackground().setSolidFill('#FFFFFF');
 
   const displaySection = section === 'All Lines' ? 'Plant Summary' : section;
   const title = slide.insertTextBox(
-    'Customer Issue Context - ' + displaySection,
+    'Top 3 Customer Issue Context - ' + displaySection,
     margin,
-    24,
+    20,
     pageWidth - (margin * 2),
     titleHeight
   );
+  title.setTitle('Top 3 Customer Issue Context - ' + displaySection);
   title.getText().getTextStyle()
     .setFontFamily('Arial')
-    .setFontSize(24)
+    .setFontSize(22)
     .setBold(true)
     .setForegroundColor('#444444');
 
   const subtitle = slide.insertTextBox(
-    monthLabel + ' - what the numbers mean on the floor',
+    monthLabel + ' - highest-impact issue groups behind the numbers',
     margin,
-    58,
+    52,
     pageWidth - (margin * 2),
-    20
+    18
   );
   subtitle.getText().getTextStyle()
     .setFontFamily('Arial')
     .setFontSize(10)
     .setForegroundColor('#666666');
 
-  const leftText = [
+  const headline = slide.insertTextBox(
     record.headline,
-    '',
-    'What customers experienced',
-    monthlyQualityNarrativeBullets_(record.experienced)
-  ].join('\n');
+    margin,
+    top,
+    pageWidth - (margin * 2),
+    26
+  );
+  headline.getText().getTextStyle()
+    .setFontFamily('Arial')
+    .setFontSize(12)
+    .setBold(true)
+    .setForegroundColor('#222222');
+
+  for (let index = 0; index < 3; index++) {
+    const issue = record.issues[index] || { title: '', why: '' };
+    const y = top + 34 + (index * (issueBoxHeight + issueGap));
+    drawMonthlyQualitySeverityIssueBox_(
+      slide,
+      margin,
+      y,
+      issueColWidth,
+      issueBoxHeight,
+      index + 1,
+      issue.title,
+      issue.why
+    );
+  }
 
   const rightText = [
-    'Main themes',
-    monthlyQualityNarrativeBullets_(record.themes),
-    '',
     'Floor takeaway',
     record.takeaway,
     '',
@@ -363,27 +422,16 @@ function drawMonthlyQualityNarrativeSlide_(slide, section, record, monthLabel) {
     monthlyQualityNarrativeBullets_(record.actions)
   ].join('\n');
 
-  const leftBox = drawMonthlyQualityNarrativeBox_(
-    slide,
-    margin,
-    top,
-    leftColWidth,
-    boxHeight,
-    leftText,
-    '#EEF3FA'
-  );
-  styleMonthlyQualityNarrativeText_(leftBox, 12);
-
   const rightBox = drawMonthlyQualityNarrativeBox_(
     slide,
-    margin + leftColWidth + gap,
-    top,
+    margin + issueColWidth + gap,
+    top + 34,
     rightColWidth,
-    boxHeight,
+    rightBoxHeight,
     rightText,
     '#FFF7CC'
   );
-  styleMonthlyQualityNarrativeText_(rightBox, 10);
+  styleMonthlyQualityNarrativeText_(rightBox, 9);
 
   const footer = slide.insertTextBox(
     'Source: ChatGPT summary of audited HubSpot ticket descriptions. Questions and documentation-only requests are excluded from failure counts.',
@@ -396,6 +444,31 @@ function drawMonthlyQualityNarrativeSlide_(slide, section, record, monthLabel) {
     .setFontFamily('Arial')
     .setFontSize(7)
     .setForegroundColor('#777777');
+}
+
+function drawMonthlyQualitySeverityIssueBox_(slide, x, y, w, h, rank, title, why) {
+  const shape = slide.insertShape(SlidesApp.ShapeType.RECTANGLE, x, y, w, h);
+  shape.getFill().setSolidFill('#EEF3FA');
+  shape.getBorder().getLineFill().setSolidFill('#9FBAD7');
+  shape.setTitle('Monthly Quality Top Severity Issue ' + rank);
+
+  const text = '#'+ rank + '  ' + title + '\n' + why;
+  shape.getText().setText(text);
+  shape.getText().getTextStyle()
+    .setFontFamily('Arial')
+    .setFontSize(9)
+    .setForegroundColor('#222222');
+
+  try {
+    shape.getText().getRange(0, String('#' + rank + '  ' + title).length)
+      .getTextStyle()
+      .setBold(true)
+      .setFontSize(10);
+  } catch (error) {
+    // If Apps Script cannot style the range, keep the full text readable.
+  }
+
+  return shape;
 }
 
 function drawMonthlyQualityNarrativeBox_(slide, x, y, w, h, text, fillColor) {
