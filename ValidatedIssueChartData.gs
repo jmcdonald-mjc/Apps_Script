@@ -6,7 +6,11 @@
  * - ticket is in the Support Pipeline (the raw sync already enforces this)
  * - Product matches the product chart
  * - primary Ticket Category is Startup, Warranty, or Service
+ * - Category Tier 3 is not one of the documentation/guidance/non-failure values
  * - MJC No Fault is NOT set
+ *
+ * The report's reconciliation cutoff is March 2026. Older chart rows remain
+ * available for continuity, but only March 2026 onward is treated as reliable.
  *
  * The exact same filtered counts are also written back to DPPM Inputs for
  * products that already have a DPPM denominator row. This keeps the service
@@ -24,6 +28,33 @@ const VALIDATED_ISSUE_COUNTED_CATEGORIES_ = Object.freeze([
   'Warranty',
   'Service'
 ]);
+
+const VALIDATED_ISSUE_EXCLUDED_TIER_3_ = Object.freeze([
+  'Support Guidance',
+  'Labor Dispute',
+  'Spec Interpretation',
+  'Program Upgrade',
+  'Customer Requested Modification',
+  'Manuals',
+  'Approved Documentation Request',
+  'Request for Drawing',
+  'Upgrade Kit',
+  'Unit Selection Guidance',
+  'Drawings',
+  'Operational Guidance',
+  'Duplicate Invoice',
+  'Training Request',
+  'Maintenance Clarification',
+  'Clarification Needed',
+  'Operation Guidance',
+  'Rate Dispute',
+  'Request for Approved Submittal'
+]);
+
+// Only March 2026 onward is used for report reconciliation. The preceding
+// rows are preserved in the rolling chart window but are not treated as an
+// audited comparison period.
+const VALIDATED_ISSUE_RELIABLE_CUTOFF_MONTH_KEY_ = '2026-03';
 
 const VALIDATED_ISSUE_PRODUCT_LINES_ = Object.freeze([
   'MSC',
@@ -99,6 +130,7 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
   [
     'Created Date',
     'Ticket Category',
+    'Category Tier 3',
     'Product',
     'MJC No Fault'
   ].forEach(function(header) {
@@ -133,6 +165,7 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
   let countableTicketCount = 0;
   let excludedNoFaultCount = 0;
   let excludedCategoryCount = 0;
+  let excludedTier3Count = 0;
 
   rawData.slice(1).forEach(function(row) {
     const month = validatedIssueMonthStart_(row[columns['Created Date']]);
@@ -143,6 +176,7 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
 
     const product = String(row[columns['Product']] || '').trim();
     const category = String(row[columns['Ticket Category']] || '').trim();
+    const tier3 = String(row[columns['Category Tier 3']] || '').trim();
     const noFault = String(row[columns['MJC No Fault']] || '').trim();
 
     if (noFault) {
@@ -152,6 +186,11 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
 
     if (VALIDATED_ISSUE_COUNTED_CATEGORIES_.indexOf(category) === -1) {
       excludedCategoryCount++;
+      return;
+    }
+
+    if (VALIDATED_ISSUE_EXCLUDED_TIER_3_.indexOf(tier3) !== -1) {
+      excludedTier3Count++;
       return;
     }
 
@@ -246,7 +285,8 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
   return {
     status: 'READY',
     source: VALIDATED_ISSUE_HUBSPOT_RAW_SHEET_,
-    method: 'Support Pipeline + Product + Startup/Warranty/Service + MJC No Fault blank',
+    method: 'Support Pipeline + six canonical products + Startup/Warranty/Service + Tier 3 exclusions + MJC No Fault blank',
+    reliableCutoffMonth: VALIDATED_ISSUE_RELIABLE_CUTOFF_MONTH_KEY_,
     chartDataSheet: VALIDATED_ISSUE_CHART_DATA_SHEET_,
     reportMonth: validatedIssueMonthKey_(reportMonth),
     currentMonthLabel: Utilities.formatDate(reportMonth, 'UTC', 'MMM'),
@@ -256,6 +296,7 @@ function refreshMonthlyQualityValidatedIssueChartData_(spreadsheet) {
     countableTicketCount: countableTicketCount,
     excludedNoFaultCount: excludedNoFaultCount,
     excludedCategoryCount: excludedCategoryCount,
+    excludedTier3Count: excludedTier3Count,
     dppmInputsUpdated: dppmInputResult.rowsUpdated,
     summaries: summaries
   };
