@@ -1,4 +1,10 @@
 /**
+ * Temporary HubSpot bypass is disabled. The live DPPM/chart refresh in
+ * ZZZ_DPPMChartOverride.gs is authoritative and performs the HubSpot sync.
+ * The helper functions below remain unused for historical reference.
+ */
+
+/**
  * TEMPORARY HubSpot bypass for the monthly quality report.
  *
  * Remove this file after the HubSpot service token is available again.
@@ -40,7 +46,7 @@ const MONTHLY_QUALITY_REPORT_CHART_SOURCE_SHEETS_ = Object.freeze([
  * rebuilding. It only consumes the validated monthly workbook and updates the
  * Slides report.
  */
-function updateMonthlyQualityPackageDPPM_(packageResult) {
+function monthlyQualityManualDppmFinalizerDisabled_(packageResult) {
   const spreadsheet = SpreadsheetApp.openById(packageResult.dataFile.getId());
 
   const hubSpotSyncResult = {
