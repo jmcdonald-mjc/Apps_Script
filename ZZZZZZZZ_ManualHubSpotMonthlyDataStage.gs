@@ -1,4 +1,10 @@
 /**
+ * Manual HubSpot mode is disabled. The live HubSpot sync in
+ * ZZZZZZ_MonthlyQualityDataGuards.gs is authoritative; this file retains only
+ * the old audited-window helpers for reference and no longer overrides it.
+ */
+
+/**
  * Temporary manual-HubSpot mode for the Monthly Quality report.
  *
  * Until the Apps Script HubSpot API authentication is repaired, the monthly
@@ -39,7 +45,7 @@ function monthlyQualityManualMonthFromKey_(monthKey) {
   return new Date(year, month - 1, 1);
 }
 
-function populateMonthlyQualityDataStage_(context, dataStage) {
+function monthlyQualityManualPopulateStageDisabled_(context, dataStage) {
   const spreadsheetId = dataStage.dataFile.getId();
   const spreadsheet = SpreadsheetApp.openById(spreadsheetId);
   const reportMonthKey = String(context.monthKey || '').trim();
